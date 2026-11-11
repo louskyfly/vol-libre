@@ -1,0 +1,715 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Vol libre — prototype</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{position:fixed;inset:0;overflow:hidden;background:#0b1016;
+    -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
+    -webkit-tap-highlight-color:transparent;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  canvas{display:block;position:absolute;inset:0;width:100%;height:100%;touch-action:none}
+  #hud{position:absolute;left:14px;top:14px;padding:10px 12px;border-radius:10px;
+    background:rgba(8,14,20,.55);backdrop-filter:blur(6px);color:#dbe9f5;font-size:13px;line-height:1.45;
+    pointer-events:none;min-width:152px}
+  #hud .r{display:flex;justify-content:space-between;gap:14px}
+  #hud .k{opacity:.55;letter-spacing:.06em;font-size:11px;padding-top:2px}
+  #hud .v{font-variant-numeric:tabular-nums;font-weight:600}
+  #hud .v small{opacity:.5;font-weight:400;font-size:10px}
+  #btns{position:absolute;right:12px;top:12px;display:flex;gap:8px}
+  #btns button{font:inherit;font-size:11px;letter-spacing:.05em;color:#cfe0ef;background:rgba(8,14,20,.55);
+    border:1px solid rgba(255,255,255,.16);border-radius:8px;padding:8px 10px;touch-action:none}
+  #btns button:active{background:rgba(255,255,255,.12)}
+  #stall{position:absolute;left:50%;top:18%;transform:translate(-50%,-50%);font-size:26px;font-weight:700;
+    letter-spacing:.28em;color:#ff5a4d;text-shadow:0 0 24px rgba(255,60,40,.7);opacity:0;transition:opacity .08s;pointer-events:none}
+  #stall.on{opacity:1}
+  #msg{position:absolute;inset:0;display:none;place-items:center;text-align:center;color:#e8f2fb;
+    background:rgba(120,10,10,.35);font-size:18px;letter-spacing:.05em;backdrop-filter:blur(2px)}
+  #msg.on{display:grid}
+  #msg span{opacity:.7;font-size:13px;display:block;margin-top:8px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<canvas id="ctl"></canvas>
+<div id="hud">
+  <div class="r"><span class="k">VIT</span><span class="v" id="spd">0<small> kt</small></span></div>
+  <div class="r"><span class="k">ALT</span><span class="v" id="alt">0<small> ft</small></span></div>
+  <div class="r"><span class="k">VAR</span><span class="v" id="vs">0<small> fpm</small></span></div>
+  <div class="r"><span class="k">CAP</span><span class="v" id="hdg">000</span></div>
+  <div class="r"><span class="k">INC</span><span class="v" id="aoa">0<small>&deg;</small></span></div>
+  <div class="r"><span class="k">GAZ</span><span class="v" id="thr">0<small>%</small></span></div>
+  <div class="r"><span class="k">FPS</span><span class="v" id="fps">0</span></div>
+</div>
+<div id="btns">
+  <button id="bcam">VUE</button>
+  <button id="breset">RESET</button>
+</div>
+<div id="stall">DÉCROCHAGE</div>
+<div id="msg">CRASH<span>touche l'écran pour repartir</span></div>
+<script type="module">
+import * as THREE from './three.module.js';
+
+/* ------------------------------------------------------------------ */
+/*  utilitaires                                                        */
+/* ------------------------------------------------------------------ */
+const clamp = (x, a, b) => x < a ? a : (x > b ? b : x);
+const lerp  = (a, b, t) => a + (b - a) * t;
+const D2R   = Math.PI / 180;
+function smoothstep(a, b, x) { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); }
+
+/* ------------------------------------------------------------------ */
+/*  bruit déterministe                                                 */
+/* ------------------------------------------------------------------ */
+function hash(x, y) { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123; return s - Math.floor(s); }
+function noise2(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const a = hash(xi, yi), b = hash(xi + 1, yi), c = hash(xi, yi + 1), d = hash(xi + 1, yi + 1);
+  return lerp(lerp(a, b, u), lerp(c, d, u), v);
+}
+function fbm(x, y, oct) {
+  let s = 0, amp = 0.5, f = 1;
+  for (let i = 0; i < oct; i++) { s += amp * noise2(x * f, y * f); f *= 2.03; amp *= 0.5; }
+  return s;
+}
+
+/* ------------------------------------------------------------------ */
+/*  terrain : une île de ~15 km, plaine plate autour de la piste       */
+/* ------------------------------------------------------------------ */
+const RW_Y = 4.2;          // altitude du dessus de piste
+const PL_Y = RW_Y - 0.35;  // plaine autour, juste en dessous
+const RW_LEN = 1300, RW_W = 34;
+
+function terrainHeight(x, z) {
+  const r = Math.hypot(x, z);
+  const R = 7800;
+  let mask = 1 - smoothstep(R * 0.55, R, r);
+  mask = Math.pow(mask, 1.2);
+  const mtn = smoothstep(2300, 4600, r);          // relief repoussé loin de la piste
+
+  const n = fbm(x * 0.00007 + 11.3, z * 0.00007 - 4.7, 5);
+  const ridge = fbm(x * 0.00021 + 3.1, z * 0.00021 + 8.2, 4);
+  let h = (n * 820 + ridge * ridge * 780) * mask * mtn;
+  h += 6 * mask - 45 * (1 - mask);
+
+  const flat = smoothstep(750, 2000, r);
+  h = PL_Y + (h - PL_Y) * flat;
+  return h;
+}
+
+const onRunway = (x, z) => Math.abs(x) < RW_W / 2 && Math.abs(z) < RW_LEN / 2;
+function groundAt(x, z) {
+  return onRunway(x, z) ? RW_Y : terrainHeight(x, z);
+}
+
+/* ------------------------------------------------------------------ */
+/*  rendu                                                              */
+/* ------------------------------------------------------------------ */
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+renderer.setSize(innerWidth, innerHeight, false);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+const scene = new THREE.Scene();
+const SKY_BOT = new THREE.Color(0xcfe0ee);
+const SKY_TOP = new THREE.Color(0x3f74ad);
+scene.fog = new THREE.Fog(0xb9cfe0, 4500, 17000);
+
+const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.5, 30000);
+
+const skyMat = new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false,
+  uniforms: { top: { value: SKY_TOP }, bot: { value: SKY_BOT } },
+  vertexShader: `varying float hh; void main(){ vec4 wp = modelMatrix*vec4(position,1.0); hh = normalize(wp.xyz).y; gl_Position = projectionMatrix*viewMatrix*wp; }`,
+  fragmentShader: `uniform vec3 top; uniform vec3 bot; varying float hh; void main(){ float t = clamp(hh*1.35+0.22,0.0,1.0); gl_FragColor = vec4(mix(bot,top,t),1.0); }`
+});
+const sky = new THREE.Mesh(new THREE.SphereGeometry(9000, 32, 16), skyMat);
+sky.frustumCulled = false;
+sky.renderOrder = -1;
+scene.add(sky);
+
+scene.add(new THREE.HemisphereLight(0xcfe4ff, 0x4a5a44, 1.5));
+const sun = new THREE.DirectionalLight(0xfff2dc, 2.0);
+sun.position.set(-0.4, 0.9, 0.35).multiplyScalar(1000);
+scene.add(sun);
+
+// --- mer
+const water = new THREE.Mesh(
+  new THREE.PlaneGeometry(60000, 60000).rotateX(-Math.PI / 2),
+  new THREE.MeshLambertMaterial({ color: 0x27567c })
+);
+water.position.y = 0;
+scene.add(water);
+
+// --- relief
+const T_SIZE = 18000, T_SEG = 256;
+
+function groundTexture() {
+  const S = 512, cv = document.createElement('canvas');
+  cv.width = cv.height = S;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#b9c4a4'; g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 4200; i++) {
+    const x = Math.random() * S, y = Math.random() * S, r = 4 + Math.random() * 16;
+    g.fillStyle = Math.random() < 0.5 ? 'rgba(120,140,104,0.5)' : 'rgba(238,242,220,0.4)';
+    g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
+  }
+  const t = new THREE.CanvasTexture(cv);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(230, 230);
+  t.anisotropy = 4;
+  return t;
+}
+
+const tGeo = new THREE.PlaneGeometry(T_SIZE, T_SIZE, T_SEG, T_SEG).rotateX(-Math.PI / 2);
+{
+  const p = tGeo.attributes.position;
+  const col = new Float32Array(p.count * 3);
+  const cSand = new THREE.Color(0xc9b78c), cGrass = new THREE.Color(0x4e7a45);
+  const cRock = new THREE.Color(0x746f66), cSnow = new THREE.Color(0xe9eef3);
+  const tmp = new THREE.Color();
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), z = p.getZ(i);
+    const y = terrainHeight(x, z);
+    p.setY(i, y);
+    if (y < 2.5)      tmp.copy(cSand);
+    else if (y < 300) tmp.copy(cGrass).lerp(cRock, smoothstep(220, 460, y));
+    else if (y < 600) tmp.copy(cRock);
+    else              tmp.copy(cRock).lerp(cSnow, smoothstep(640, 900, y));
+    // variation de teinte : champs, forêts, éboulis
+    const shade = 0.86 + 0.28 * fbm(x * 0.0016 + 5, z * 0.0016 - 3, 3);
+    tmp.multiplyScalar(shade);
+    col[i * 3] = tmp.r; col[i * 3 + 1] = tmp.g; col[i * 3 + 2] = tmp.b;
+  }
+  tGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  tGeo.computeBoundingSphere();
+}
+const terrain = new THREE.Mesh(tGeo, new THREE.MeshLambertMaterial({
+  vertexColors: true, flatShading: true, map: groundTexture()
+}));
+scene.add(terrain);
+
+// --- forêt (instanciée : un seul appel de dessin)
+{
+  const N = 5200;
+  const geo = new THREE.ConeGeometry(2.0, 9.0, 6);
+  geo.translate(0, 4.5, 0);
+  const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
+  const inst = new THREE.InstancedMesh(geo, mat, N);
+  const m4 = new THREE.Matrix4(), q0 = new THREE.Quaternion(), sc = new THREE.Vector3(), pv = new THREE.Vector3();
+  const col = new THREE.Color();
+  let n = 0, guard = 0;
+  while (n < N && guard++ < N * 40) {
+    const a = Math.random() * Math.PI * 2;
+    const rr = 700 + Math.random() * 4600;
+    const x = Math.cos(a) * rr, z = Math.sin(a) * rr;
+    const h = terrainHeight(x, z);
+    if (h < 3 || h > 520) continue;
+    // pas d'arbres sur la piste ni juste autour
+    if (Math.abs(x) < 90 && Math.abs(z) < RW_LEN * 0.6) continue;
+    const s = 0.65 + Math.random() * 1.35;
+    pv.set(x, h - 0.4, z);
+    sc.set(s * (0.8 + Math.random() * 0.4), s, s * (0.8 + Math.random() * 0.4));
+    q0.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.random() * 6.28);
+    m4.compose(pv, q0, sc);
+    inst.setMatrixAt(n, m4);
+    col.setHSL(0.24 + Math.random() * 0.06, 0.32 + Math.random() * 0.2, 0.16 + Math.random() * 0.12);
+    inst.setColorAt(n, col);
+    n++;
+  }
+  inst.count = n;
+  inst.instanceMatrix.needsUpdate = true;
+  if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+  scene.add(inst);
+}
+
+// --- piste
+const runway = new THREE.Mesh(new THREE.BoxGeometry(RW_W, 0.6, RW_LEN),
+  new THREE.MeshLambertMaterial({ color: 0x4a4e52 }));
+runway.position.set(0, RW_Y - 0.3, 0);
+scene.add(runway);
+const lineMat = new THREE.MeshBasicMaterial({ color: 0xe8e8e2 });
+for (let i = -14; i <= 14; i++) {
+  if (i % 2) continue;
+  const l = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 22).rotateX(-Math.PI / 2), lineMat);
+  l.position.set(0, RW_Y + 0.02, i * 42);
+  scene.add(l);
+}
+
+/* ------------------------------------------------------------------ */
+/*  avion (nez vers -Z)                                                */
+/* ------------------------------------------------------------------ */
+const aircraft = new THREE.Group();
+{
+  const white = new THREE.MeshLambertMaterial({ color: 0xf0f3f7 });
+  const red   = new THREE.MeshLambertMaterial({ color: 0xb8362c });
+  const dark  = new THREE.MeshLambertMaterial({ color: 0x22262c });
+  const glass = new THREE.MeshLambertMaterial({ color: 0x9fd0f0, transparent: true, opacity: 0.45 });
+
+  const fus = new THREE.Mesh(new THREE.BoxGeometry(1.25, 1.3, 7.4), white);
+  fus.position.y = 0.15; aircraft.add(fus);
+
+  const nose = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.5, 0.9, 12), red);
+  nose.rotation.x = Math.PI / 2; nose.position.set(0, 0.1, -3.9); aircraft.add(nose);
+
+  const canopy = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.75, 1.9), glass);
+  canopy.position.set(0, 0.72, -1.2); aircraft.add(canopy);
+
+  const wing = new THREE.Mesh(new THREE.BoxGeometry(11, 0.26, 1.8), white);
+  wing.position.set(0, 0.2, -0.3); aircraft.add(wing);
+  const wingTipL = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.28, 1.8), red);
+  wingTipL.position.set(-5.2, 0.2, -0.3); aircraft.add(wingTipL);
+  const wingTipR = wingTipL.clone(); wingTipR.position.x = 5.2; aircraft.add(wingTipR);
+
+  const stab = new THREE.Mesh(new THREE.BoxGeometry(3.9, 0.18, 1.0), white);
+  stab.position.set(0, 0.35, 3.3); aircraft.add(stab);
+  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.5, 1.15), white);
+  fin.position.set(0, 1.0, 3.35); aircraft.add(fin);
+  const finTip = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.35, 1.2), red);
+  finTip.position.set(0, 1.72, 3.35); aircraft.add(finTip);
+
+  const gear = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.12, 0.12), dark);
+  gear.position.set(0, -0.62, -0.6); aircraft.add(gear);
+  for (const sx of [-1.3, 1.3]) {
+    const w = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.16, 10), dark);
+    w.rotation.z = Math.PI / 2; w.position.set(sx, -0.78, -0.6); aircraft.add(w);
+  }
+  const wheelN = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.14, 10), dark);
+  wheelN.rotation.z = Math.PI / 2; wheelN.position.set(0, -0.85, -3.2); aircraft.add(wheelN);
+
+  const prop = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.14, 0.05), dark);
+  prop.position.set(0, 0.1, -4.35); aircraft.add(prop);
+  aircraft.userData.prop = prop;
+  const spinner = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.5, 10), red);
+  spinner.rotation.x = -Math.PI / 2; spinner.position.set(0, 0.1, -4.6); aircraft.add(spinner);
+}
+scene.add(aircraft);
+
+/* ------------------------------------------------------------------ */
+/*  modèle de vol (6 degrés de liberté, coefficients type C172)        */
+/* ------------------------------------------------------------------ */
+const AC = {
+  m: 880, S: 16.2, b: 11.0, c: 1.5, g: 9.81,
+  CL0: 0.38, CLa: 5.6, CD0: 0.028, k: 0.048,
+  Cm0: 0.14, Cm_a: -1.0, Cm_de: 0.20, Cm_q: -24,
+  Cl_b: -0.09, Cl_p: -0.5, Cl_da: 0.058, Cl_r: 0.06,
+  Cn_b: 0.09, Cn_r: -0.12, Cn_dr: 0.032, Cn_da: -0.012,
+  CY_b: -0.6, Tmax: 2600, nwLoad: 2300,
+  Ix: 1540, Iy: 2250, Iz: 1085       // tangage, lacet, roulis
+};
+const GEAR_H = 1.15;
+const A_STALL = 0.28;                 // ~16 degrés
+
+const pos   = new THREE.Vector3(0, RW_Y + GEAR_H, 560);
+const vel   = new THREE.Vector3();
+const quat  = new THREE.Quaternion();
+const omega = new THREE.Vector3();
+
+const ctrl   = { elev: 0, ail: 0, rud: 0, thr: 0 };
+const target = { elev: 0, ail: 0, rud: 0, thr: 0 };
+
+let onGround = true, crashed = false, stallLevel = 0, aoaLive = 0;
+let lastGh = 0, simT = 0, throttle = 0;
+
+const _qI = new THREE.Quaternion(), _vb = new THREE.Vector3(), _vbN = new THREE.Vector3();
+const _Fb = new THREE.Vector3(), _Fw = new THREE.Vector3(), _T = new THREE.Vector3();
+const _Iw = new THREE.Vector3(), _cr = new THREE.Vector3(), _fwd = new THREE.Vector3();
+
+function reset() {
+  pos.set(0, RW_Y + GEAR_H, 560);
+  vel.set(0, 0, 0);
+  quat.identity();
+  omega.set(0, 0, 0);
+  ctrl.elev = ctrl.ail = ctrl.rud = ctrl.thr = 0;
+  target.elev = target.ail = target.rud = target.thr = 0;
+  throttle = 0;
+  crashed = false;
+  lastGh = groundAt(pos.x, pos.z);
+  document.getElementById('msg').classList.remove('on');
+}
+
+function crash() {
+  if (crashed) return;
+  crashed = true;
+  document.getElementById('msg').classList.add('on');
+}
+
+function step(dt) {
+  simT += dt;
+
+  const k = 1 - Math.exp(-dt * 9);
+  ctrl.elev = lerp(ctrl.elev, target.elev, k);
+  ctrl.ail  = lerp(ctrl.ail,  target.ail,  k);
+  ctrl.rud  = lerp(ctrl.rud,  target.rud,  k);
+  ctrl.thr  = lerp(ctrl.thr,  target.thr,  k);
+
+  const rho = 1.225 * Math.exp(-Math.max(pos.y, 0) / 8500);
+  _qI.copy(quat).invert();
+  _vb.copy(vel).applyQuaternion(_qI);
+
+  const u  = -_vb.z;
+  const vs =  _vb.x;
+  const wd = -_vb.y;
+  const V  = Math.max(Math.sqrt(_vb.lengthSq()), 0.05);
+  const alpha = V > 2 ? Math.atan2(wd, u) : 0;
+  const beta  = V > 2 ? Math.atan2(vs, Math.hypot(u, wd) + 0.001) : 0;
+  aoaLive = alpha;
+
+  const aAbs = Math.abs(alpha), sg = alpha < 0 ? -1 : 1;
+  let CL;
+  if (aAbs < A_STALL) CL = AC.CL0 + AC.CLa * alpha;
+  else {
+    const peak = AC.CL0 + AC.CLa * A_STALL * sg;
+    CL = peak * Math.max(0.45, 1 - (aAbs - A_STALL) * 2.3);
+  }
+  const stall = clamp((aAbs - A_STALL) / 0.22, 0, 1);
+  stallLevel = stall;
+
+  const CD = AC.CD0 + AC.k * CL * CL + 0.85 * stall * Math.abs(Math.sin(alpha));
+
+  const qbar = 0.5 * rho * V * V;
+  const lift = qbar * AC.S * CL;
+  const drag = qbar * AC.S * CD;
+  const side = qbar * AC.S * AC.CY_b * beta;
+
+  const thrAvail = AC.Tmax * (1 - 0.5 * Math.pow(V / 76, 2)) * Math.exp(-Math.max(pos.y, 0) / 12000);
+  const T = Math.max(0, thrAvail) * ctrl.thr;
+
+  _Fb.set(0, lift, 0);
+  _vbN.copy(_vb).normalize();
+  _Fb.addScaledVector(_vbN, -drag);
+  _Fb.x += side;
+  _Fb.z -= T;
+
+  _Fw.copy(_Fb).applyQuaternion(quat);
+  _Fw.y -= AC.m * AC.g;
+
+  // --- moments
+  const p = -omega.z, q = omega.x, r = -omega.y;
+  const nV = 2 * Math.max(V, 1);
+  const pitchNow = Math.asin(clamp(_fwd.set(0, 0, -1).applyQuaternion(quat).y, -1, 1));
+  let M = qbar * AC.S * AC.c * (AC.Cm0 + AC.Cm_a * alpha + AC.Cm_de * ctrl.elev + AC.Cm_q * (q * AC.c / nV));
+  if (onGround && pitchNow < 0.05) {
+    // appui du train avant : moment constant tant que la roue touche
+    if (pitchNow > -0.005) M -= AC.nwLoad;
+    else M += -pitchNow * 400000 - omega.x * 20000;
+  }
+  const L = qbar * AC.S * AC.b * (AC.Cl_b * beta + AC.Cl_p * (p * AC.b / nV) + AC.Cl_da * ctrl.ail + AC.Cl_r * (r * AC.b / nV));
+  let N = qbar * AC.S * AC.b * (AC.Cn_b * beta + AC.Cn_r * (r * AC.b / nV) + AC.Cn_da * ctrl.ail);
+
+  const rudCmd = clamp(ctrl.rud + clamp(beta * 3.5, -0.5, 0.5) + clamp(p * 0.04, -0.2, 0.2), -1, 1);
+  N += qbar * AC.S * AC.b * AC.Cn_dr * rudCmd;
+
+  _T.set(M, -N, -L);
+  if (stall > 0.05) _T.z += -stall * 5200 * (beta >= 0 ? 1 : -1);   // chute d'aile
+
+  _Iw.set(AC.Ix * omega.x, AC.Iy * omega.y, AC.Iz * omega.z);
+  _cr.copy(omega).cross(_Iw);
+  omega.x += (_T.x - _cr.x) / AC.Ix * dt;
+  omega.y += (_T.y - _cr.y) / AC.Iy * dt;
+  omega.z += (_T.z - _cr.z) / AC.Iz * dt;
+  omega.multiplyScalar(1 - dt * 0.4);
+
+  const dq = new THREE.Quaternion(omega.x * dt * 0.5, omega.y * dt * 0.5, omega.z * dt * 0.5, 1);
+  quat.multiply(dq).normalize();
+
+  // --- translation
+  vel.addScaledVector(_Fw, dt / AC.m);
+  pos.addScaledVector(vel, dt);
+
+  // --- sol
+  const gh = groundAt(pos.x, pos.z);
+  const wasAir = !onGround;
+  onGround = false;
+  if (gh > lastGh + 0.35 && Math.hypot(vel.x, vel.z) > 10) crash();   // relief qui monte trop vite
+  lastGh = gh;
+  if (pos.y < gh + GEAR_H) {
+    const impact = vel.y;
+    const speedH = Math.hypot(vel.x, vel.z);
+    if (impact < -3.5 || (wasAir && !onRunway(pos.x, pos.z) && speedH > 12 && impact < -1.2)) crash();
+    pos.y = gh + GEAR_H;
+    vel.y = 0;
+    onGround = true;
+    const sp = Math.hypot(vel.x, vel.z);
+    const decel = (ctrl.thr > 0.05 ? 0.18 : 1.1) * dt;
+    if (sp > 1e-4) { const f = Math.max(0, sp - decel) / sp; vel.x *= f; vel.z *= f; }
+    omega.x *= Math.exp(-dt * 2.5);
+    omega.z *= Math.exp(-dt * 7);
+    omega.y *= Math.exp(-dt * 1.5);
+    if (pitchNow > 0.24 && omega.x > 0) omega.x = 0;
+    omega.y -= rudCmd * dt * 2.2 * clamp(1 - speedH / 30, 0, 1);
+    if (speedH < 4) {
+      const fwd = _fwd.set(0, 0, -1).applyQuaternion(quat);
+      const yaw = Math.atan2(-fwd.x, -fwd.z);
+      const lvl = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0));
+      quat.slerp(lvl, 1 - Math.exp(-dt * 4));
+      omega.set(0, 0, 0);
+    }
+  }
+  if (pos.y < 0.6) crash();   // amerrissage
+
+  aircraft.position.copy(pos);
+  aircraft.quaternion.copy(quat);
+  aircraft.userData.prop.rotation.z += dt * (8 + ctrl.thr * 120);
+}
+
+/* ------------------------------------------------------------------ */
+/*  commandes tactiles + clavier                                       */
+/* ------------------------------------------------------------------ */
+const ctlCanvas = document.getElementById('ctl');
+const ctl2d = ctlCanvas.getContext('2d');
+function sizeCtl() {
+  const d = Math.min(window.devicePixelRatio || 1, 2);
+  ctlCanvas.width = innerWidth * d; ctlCanvas.height = innerHeight * d;
+  ctlCanvas.style.width = innerWidth + 'px'; ctlCanvas.style.height = innerHeight + 'px';
+  ctl2d.setTransform(d, 0, 0, d, 0, 0);
+}
+sizeCtl();
+
+const stick = { on: false, id: null, cx: 0, cy: 0, dx: 0, dy: 0, R: 105 };
+const thrTouch = { on: false, id: null };
+const rudTouch = { on: false, id: null, dir: 0 };
+const keys = new Set();
+
+function layout() {
+  const W = innerWidth, H = innerHeight;
+  return {
+    W, H,
+    thr: { x0: W - 118, y0: H * 0.30, x1: W - 12, y1: H - 165 },
+    rudL: { x0: W - 258, y0: H - 138, x1: W - 152, y1: H - 42 },
+    rudR: { x0: W - 146, y0: H - 138, x1: W - 40, y1: H - 42 }
+  };
+}
+const inRect = (x, y, r) => x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1;
+
+canvas.addEventListener('pointerdown', e => {
+  if (crashed) { reset(); return; }
+  const L = layout(), x = e.clientX, y = e.clientY;
+  if (inRect(x, y, L.rudL)) { rudTouch.on = true; rudTouch.id = e.pointerId; rudTouch.dir = -1; }
+  else if (inRect(x, y, L.rudR)) { rudTouch.on = true; rudTouch.id = e.pointerId; rudTouch.dir = 1; }
+  else if (x > L.thr.x0 && y > L.thr.y0) { thrTouch.on = true; thrTouch.id = e.pointerId; setThrFromY(y, L); }
+  else if (x < L.W * 0.62 && !stick.on) {
+    stick.on = true; stick.id = e.pointerId;
+    stick.cx = x; stick.cy = y; stick.dx = 0; stick.dy = 0;
+  }
+  canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener('pointermove', e => {
+  const L = layout(), x = e.clientX, y = e.clientY;
+  if (stick.on && e.pointerId === stick.id) {
+    stick.dx = clamp((x - stick.cx) / stick.R, -1, 1);
+    stick.dy = clamp((y - stick.cy) / stick.R, -1, 1);
+  } else if (thrTouch.on && e.pointerId === thrTouch.id) {
+    setThrFromY(y, L);
+  }
+});
+function endPointer(e) {
+  if (e.pointerId === stick.id) { stick.on = false; stick.id = null; stick.dx = 0; stick.dy = 0; }
+  if (e.pointerId === thrTouch.id) { thrTouch.on = false; thrTouch.id = null; }
+  if (e.pointerId === rudTouch.id) { rudTouch.on = false; rudTouch.id = null; rudTouch.dir = 0; }
+}
+canvas.addEventListener('pointerup', endPointer);
+canvas.addEventListener('pointercancel', endPointer);
+function setThrFromY(y, L) {
+  throttle = clamp((y - L.thr.y0) / (L.thr.y1 - L.thr.y0), 0, 1);
+}
+
+addEventListener('keydown', e => {
+  if (e.repeat) return;
+  keys.add(e.code);
+  if (e.code === 'KeyR') reset();
+  if (e.code === 'KeyC') cycleCam();
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
+});
+addEventListener('keyup', e => keys.delete(e.code));
+const K = c => keys.has(c) ? 1 : 0;
+
+function keyboard() {
+  let e = 0, a = 0, r = 0, t = null;
+  if (K('ArrowDown') || K('KeyS')) e -= 1;    // pousser = nez bas
+  if (K('ArrowUp')   || K('KeyW')) e += 1;
+  if (K('ArrowRight')|| K('KeyD')) a += 1;
+  if (K('ArrowLeft') || K('KeyA')) a -= 1;
+  if (K('KeyE')) r += 1;
+  if (K('KeyQ')) r -= 1;
+  if (K('ShiftLeft') || K('ShiftRight')) t = 1;
+  if (K('ControlLeft')) t = 0;
+  return { e, a, r, t };
+}
+
+/* ------------------------------------------------------------------ */
+/*  caméra                                                             */
+/* ------------------------------------------------------------------ */
+let camMode = 0;
+const camPos = new THREE.Vector3(0, 30, 590);
+function cycleCam() { camMode = (camMode + 1) % 3; }
+document.getElementById('bcam').addEventListener('click', e => { e.stopPropagation(); cycleCam(); });
+document.getElementById('breset').addEventListener('click', e => { e.stopPropagation(); reset(); });
+
+const _up = new THREE.Vector3(), _right = new THREE.Vector3();
+function updateCamera(dt) {
+  _fwd.set(0, 0, -1).applyQuaternion(quat);
+  _up.set(0, 1, 0).applyQuaternion(quat);
+  _right.set(1, 0, 0).applyQuaternion(quat);
+
+  if (camMode === 1) {
+    camera.position.copy(pos).addScaledVector(_fwd, 0.7).addScaledVector(_up, 0.85).addScaledVector(_right, -0.35);
+    camera.lookAt(pos.clone().addScaledVector(_fwd, 60).addScaledVector(_up, 0.6));
+    aircraft.visible = false;
+  } else {
+    aircraft.visible = true;
+    const yaw = Math.atan2(-_fwd.x, -_fwd.z);
+    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0));
+    const off = camMode === 0 ? new THREE.Vector3(0, 4.6, 15) : new THREE.Vector3(7, 2.2, 3);
+    const want = pos.clone().add(off.applyQuaternion(q));
+    camPos.lerp(want, 1 - Math.exp(-dt * 6));
+    camera.position.copy(camPos);
+    camera.lookAt(pos.clone().addScaledVector(_fwd, 12).addScaledVector(_up, 1.2));
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  HUD + commandes dessinées                                          */
+/* ------------------------------------------------------------------ */
+const el = id => document.getElementById(id);
+const hudSpd = el('spd'), hudAlt = el('alt'), hudVs = el('vs'), hudHdg = el('hdg'),
+      hudAoa = el('aoa'), hudThr = el('thr'), hudFps = el('fps'), hudStall = el('stall');
+
+function updateHUD() {
+  const kt = Math.hypot(vel.x, vel.y, vel.z) * 1.94384;
+  hudSpd.innerHTML = kt.toFixed(0) + '<small> kt</small>';
+  hudAlt.innerHTML = (pos.y * 3.28084).toFixed(0) + '<small> ft</small>';
+  hudVs.innerHTML = (vel.y * 196.85).toFixed(0) + '<small> fpm</small>';
+  _fwd.set(0, 0, -1).applyQuaternion(quat);
+  const hdg = (Math.atan2(_fwd.x, -_fwd.z) / D2R + 360) % 360;
+  hudHdg.textContent = String(Math.round(hdg) % 360).padStart(3, '0');
+  hudAoa.innerHTML = (aoaLive / D2R).toFixed(1) + '<small>&deg;</small>';
+  hudThr.innerHTML = (ctrl.thr * 100).toFixed(0) + '<small>%</small>';
+  hudStall.classList.toggle('on', stallLevel > 0.15 && !onGround);
+}
+
+function roundRect(x, y, w, h, r) {
+  ctl2d.beginPath();
+  ctl2d.moveTo(x + r, y);
+  ctl2d.arcTo(x + w, y, x + w, y + h, r);
+  ctl2d.arcTo(x + w, y + h, x, y + h, r);
+  ctl2d.arcTo(x, y + h, x, y, r);
+  ctl2d.arcTo(x, y, x + w, y, r);
+  ctl2d.closePath();
+}
+
+function drawControls() {
+  const L = layout(), W = L.W, H = L.H;
+  ctl2d.clearRect(0, 0, W, H);
+  ctl2d.textAlign = 'center';
+  ctl2d.textBaseline = 'middle';
+
+  // --- manette des gaz
+  const tx = L.thr.x1 - 26, ty0 = L.thr.y0, ty1 = L.thr.y1;
+  ctl2d.fillStyle = 'rgba(10,18,26,.42)';
+  roundRect(W - 128, ty0 - 14, 116, (ty1 - ty0) + 30, 14); ctl2d.fill();
+  ctl2d.fillStyle = 'rgba(255,255,255,.16)';
+  roundRect(tx - 7, ty0, 14, ty1 - ty0, 7); ctl2d.fill();
+  const ky = lerp(ty1, ty0, throttle);
+  ctl2d.fillStyle = '#6fd0ff';
+  roundRect(tx - 12, ky - 16, 24, 32, 9); ctl2d.fill();
+  ctl2d.fillStyle = 'rgba(220,235,247,.6)';
+  ctl2d.font = '10px ui-monospace,monospace';
+  ctl2d.fillText('GAZ', tx, ty0 - 22);
+
+  // --- palonniers
+  for (const [r, lab] of [[L.rudL, '<'], [L.rudR, '>']]) {
+    const act = rudTouch.on && rudTouch.dir === (r === L.rudL ? -1 : 1);
+    ctl2d.fillStyle = act ? 'rgba(111,208,255,.35)' : 'rgba(10,18,26,.38)';
+    roundRect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0, 14); ctl2d.fill();
+    ctl2d.strokeStyle = 'rgba(255,255,255,.16)'; ctl2d.lineWidth = 1; ctl2d.stroke();
+    ctl2d.fillStyle = 'rgba(220,235,247,.7)';
+    ctl2d.font = '22px ui-monospace,monospace';
+    ctl2d.fillText(lab, (r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2 + 1);
+  }
+
+  // --- manche virtuel flottant
+  if (stick.on) {
+    const bx = stick.cx, by = stick.cy, R = stick.R;
+    ctl2d.strokeStyle = 'rgba(255,255,255,.22)'; ctl2d.lineWidth = 2;
+    ctl2d.beginPath(); ctl2d.arc(bx, by, R, 0, Math.PI * 2); ctl2d.stroke();
+    ctl2d.beginPath(); ctl2d.moveTo(bx - R, by); ctl2d.lineTo(bx + R, by);
+    ctl2d.moveTo(bx, by - R); ctl2d.lineTo(bx, by + R);
+    ctl2d.strokeStyle = 'rgba(255,255,255,.1)'; ctl2d.stroke();
+    const kx = bx + stick.dx * R, ky2 = by + stick.dy * R;
+    ctl2d.beginPath(); ctl2d.arc(kx, ky2, 28, 0, Math.PI * 2);
+    ctl2d.fillStyle = 'rgba(111,208,255,.3)'; ctl2d.fill();
+    ctl2d.strokeStyle = '#8ed8ff'; ctl2d.lineWidth = 2; ctl2d.stroke();
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  boucle                                                             */
+/* ------------------------------------------------------------------ */
+const FIXED = 1 / 120;
+let acc = 0, last = performance.now(), fpsT = 0, fpsN = 0;
+
+function frame(now) {
+  const dtReal = Math.min((now - last) / 1000, 0.25);
+  last = now;
+  fpsT += dtReal; fpsN++;
+  if (fpsT > 0.5) { hudFps.textContent = (fpsN / fpsT).toFixed(0); fpsT = 0; fpsN = 0; }
+
+  const kb = keyboard();
+  const ex = v => v * 0.55 + 0.45 * v * v * v;      // expo : doux au centre
+  target.elev = clamp(ex(stick.on ? stick.dy : kb.e), -1, 1);
+  target.ail  = clamp(ex(stick.on ? stick.dx : kb.a), -1, 1);
+  if (kb.t !== null) throttle = lerp(throttle, kb.t, 0.08);
+  target.thr = throttle;
+  if (rudTouch.on) target.rud = rudTouch.dir;
+  else if (K('KeyQ') || K('KeyE')) target.rud = kb.r;
+  else target.rud = 0;
+
+  if (!crashed) {
+    acc += Math.min(dtReal, 0.1);
+    let guard = 0;
+    while (acc >= FIXED && guard++ < 16) { step(FIXED); acc -= FIXED; }
+    if (acc > 0.2) acc = 0;
+  } else {
+    acc = 0;
+  }
+
+  updateCamera(dtReal);
+  sky.position.copy(camera.position);
+  updateHUD();
+  drawControls();
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+
+addEventListener('resize', () => {
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  sizeCtl();
+});
+
+document.getElementById('msg').addEventListener('pointerdown', () => reset());
+
+reset();
+camPos.set(pos.x, pos.y + 12, pos.z + 30);
+requestAnimationFrame(frame);
+
+/* sonde de diagnostic (utilisée par les tests, sans effet sur le jeu) */
+window.__dbg = () => {
+  _fwd.set(0, 0, -1).applyQuaternion(quat);
+  return {
+    alt: +pos.y.toFixed(2), vy: +vel.y.toFixed(2), spd: +vel.length().toFixed(1),
+    x: +pos.x.toFixed(1), z: +pos.z.toFixed(1),
+    aoa: +(aoaLive / D2R).toFixed(1), pitch: +(Math.asin(clamp(_fwd.y, -1, 1)) / D2R).toFixed(1),
+    thrust: +ctrl.thr.toFixed(2), ground: onGround, crash: crashed, t: +simT.toFixed(1)
+  };
+};
+</script>
+</body>
+</html>
