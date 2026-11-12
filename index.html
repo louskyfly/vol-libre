@@ -31,6 +31,10 @@
   #stall{position:absolute;left:50%;top:18%;transform:translate(-50%,-50%);font-size:26px;font-weight:700;
     letter-spacing:.28em;color:#ff5a4d;text-shadow:0 0 24px rgba(255,60,40,.7);opacity:0;transition:opacity .08s;pointer-events:none}
   #stall.on{opacity:1}
+  #ah{position:absolute;left:50%;top:12px;bottom:auto;transform:translateX(-50%);width:124px;height:124px;
+    pointer-events:none;opacity:.92;filter:drop-shadow(0 2px 8px rgba(0,0,0,.45))}
+  #map{position:absolute;left:14px;top:198px;right:auto;bottom:auto;width:112px;height:112px;pointer-events:none;opacity:.9;
+    border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,.4)}
   #msg{position:absolute;inset:0;display:none;place-items:center;text-align:center;color:#e8f2fb;
     background:rgba(120,10,10,.35);font-size:18px;letter-spacing:.05em;backdrop-filter:blur(2px)}
   #msg.on{display:grid}
@@ -51,8 +55,11 @@
 </div>
 <div id="btns">
   <button id="bcam">VUE</button>
+  <button id="bson">SON</button>
   <button id="breset">RESET</button>
 </div>
+<canvas id="ah" width="150" height="150"></canvas>
+<canvas id="map" width="150" height="150"></canvas>
 <div id="stall">DÉCROCHAGE</div>
 <div id="hint">Glisse la manette GAZ vers le haut, puis tire le manche vers toi</div>
 <div id="msg">CRASH<span>touche l'écran pour repartir</span></div>
@@ -90,6 +97,13 @@ const RW_Y = 4.2;          // altitude du dessus de piste
 const PL_Y = RW_Y - 0.35;  // plaine autour, juste en dessous
 const RW_LEN = 1300, RW_W = 34;
 
+// îlots au large, pour un horizon moins vide
+const ISLETS = [
+  { x: 6200, z: -4200, r: 1500, h: 120 },
+  { x: -6800, z: -2600, r: 1900, h: 170 },
+  { x: 2100, z: 7400, r: 1200, h: 90 }
+];
+
 function terrainHeight(x, z) {
   const r = Math.hypot(x, z);
   const R = 7800;
@@ -101,6 +115,14 @@ function terrainHeight(x, z) {
   const ridge = fbm(x * 0.00021 + 3.1, z * 0.00021 + 8.2, 4);
   let h = (n * 820 + ridge * ridge * 780) * mask * mtn;
   h += 6 * mask - 45 * (1 - mask);
+
+  for (const is of ISLETS) {
+    const dd = Math.hypot(x - is.x, z - is.z);
+    if (dd < is.r) {
+      const f = 1 - dd / is.r;
+      h = Math.max(h, -30 + f * f * (is.h + 45));
+    }
+  }
 
   const flat = smoothstep(750, 2000, r);
   h = PL_Y + (h - PL_Y) * flat;
@@ -124,24 +146,34 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 const scene = new THREE.Scene();
 const SKY_BOT = new THREE.Color(0xcfe0ee);
 const SKY_TOP = new THREE.Color(0x3f74ad);
-scene.fog = new THREE.Fog(0xb9cfe0, 4500, 17000);
+scene.fog = new THREE.Fog(0xc6d9e6, 1600, 9500);
 
 const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.5, 30000);
 
+const SUN_DIR = new THREE.Vector3(-0.42, 0.66, 0.36).normalize();
 const skyMat = new THREE.ShaderMaterial({
   side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false,
-  uniforms: { top: { value: SKY_TOP }, bot: { value: SKY_BOT } },
-  vertexShader: `varying float hh; void main(){ vec4 wp = modelMatrix*vec4(position,1.0); hh = normalize(wp.xyz).y; gl_Position = projectionMatrix*viewMatrix*wp; }`,
-  fragmentShader: `uniform vec3 top; uniform vec3 bot; varying float hh; void main(){ float t = clamp(hh*1.35+0.22,0.0,1.0); gl_FragColor = vec4(mix(bot,top,t),1.0); }`
+  uniforms: { top: { value: SKY_TOP }, bot: { value: SKY_BOT }, sunDir: { value: SUN_DIR } },
+  vertexShader: `varying vec3 vd; void main(){ vec4 wp = modelMatrix*vec4(position,1.0); vd = normalize(wp.xyz); gl_Position = projectionMatrix*viewMatrix*wp; }`,
+  fragmentShader: `
+    uniform vec3 top; uniform vec3 bot; uniform vec3 sunDir; varying vec3 vd;
+    void main(){
+      float t = clamp(vd.y * 1.35 + 0.22, 0.0, 1.0);
+      vec3 c = mix(bot, top, t);
+      float s = max(dot(vd, sunDir), 0.0);
+      c += vec3(1.0, 0.90, 0.72) * pow(s, 5.0) * 0.26;
+      c += vec3(1.0, 0.96, 0.88) * pow(s, 900.0) * 3.2;
+      gl_FragColor = vec4(c, 1.0);
+    }`
 });
 const sky = new THREE.Mesh(new THREE.SphereGeometry(9000, 32, 16), skyMat);
 sky.frustumCulled = false;
 sky.renderOrder = -1;
 scene.add(sky);
 
-scene.add(new THREE.HemisphereLight(0xcfe4ff, 0x4a5a44, 1.5));
-const sun = new THREE.DirectionalLight(0xfff2dc, 2.0);
-sun.position.set(-0.4, 0.9, 0.35).multiplyScalar(1000);
+scene.add(new THREE.HemisphereLight(0xcfe4ff, 0x4a5a44, 1.35));
+const sun = new THREE.DirectionalLight(0xfff2dc, 2.2);
+sun.position.copy(SUN_DIR).multiplyScalar(1000);
 scene.add(sun);
 
 // --- mer
@@ -175,20 +207,23 @@ function groundTexture() {
 const tGeo = new THREE.PlaneGeometry(T_SIZE, T_SIZE, T_SEG, T_SEG).rotateX(-Math.PI / 2);
 {
   const p = tGeo.attributes.position;
+  for (let i = 0; i < p.count; i++) p.setY(i, terrainHeight(p.getX(i), p.getZ(i)));
+  tGeo.computeVertexNormals();
+
+  const nrm = tGeo.attributes.normal;
   const col = new Float32Array(p.count * 3);
-  const cSand = new THREE.Color(0xc9b78c), cGrass = new THREE.Color(0x4e7a45);
-  const cRock = new THREE.Color(0x746f66), cSnow = new THREE.Color(0xe9eef3);
+  const cSand = new THREE.Color(0xd6c49a), cGrass = new THREE.Color(0x4e7a45);
+  const cRock = new THREE.Color(0x7a756c), cSnow = new THREE.Color(0xeef3f7);
   const tmp = new THREE.Color();
   for (let i = 0; i < p.count; i++) {
-    const x = p.getX(i), z = p.getZ(i);
-    const y = terrainHeight(x, z);
-    p.setY(i, y);
-    if (y < 2.5)      tmp.copy(cSand);
-    else if (y < 300) tmp.copy(cGrass).lerp(cRock, smoothstep(220, 460, y));
-    else if (y < 600) tmp.copy(cRock);
-    else              tmp.copy(cRock).lerp(cSnow, smoothstep(640, 900, y));
-    // variation de teinte : champs, forêts, éboulis
-    const shade = 0.86 + 0.28 * fbm(x * 0.0016 + 5, z * 0.0016 - 3, 3);
+    const x = p.getX(i), z = p.getZ(i), y = p.getY(i);
+    const slope = 1 - Math.abs(nrm.getY(i));
+    if (y < 0.8)      tmp.copy(cSand);
+    else if (y < 4.5) tmp.copy(cSand).lerp(cGrass, smoothstep(0.8, 4.5, y));
+    else              tmp.copy(cGrass).lerp(cRock, smoothstep(200, 520, y));
+    if (y > 640)     tmp.lerp(cSnow, smoothstep(640, 900, y));
+    tmp.lerp(cRock, smoothstep(0.28, 0.62, slope) * 0.85);
+    const shade = 0.84 + 0.3 * fbm(x * 0.0016 + 5, z * 0.0016 - 3, 3);
     tmp.multiplyScalar(shade);
     col[i * 3] = tmp.r; col[i * 3 + 1] = tmp.g; col[i * 3 + 2] = tmp.b;
   }
@@ -201,10 +236,11 @@ const terrain = new THREE.Mesh(tGeo, new THREE.MeshLambertMaterial({
 scene.add(terrain);
 
 // --- forêt (instanciée : un seul appel de dessin)
+const TREE_COLS = ['#1e3a1a', '#2a4a22', '#33531f', '#254127', '#1b3320'];
 {
   const N = 5200;
-  const geo = new THREE.ConeGeometry(2.0, 9.0, 6);
-  geo.translate(0, 4.5, 0);
+  const geo = new THREE.ConeGeometry(2.2, 11.0, 6);
+  geo.translate(0, 5.5, 0);
   const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
   const inst = new THREE.InstancedMesh(geo, mat, N);
   const m4 = new THREE.Matrix4(), q0 = new THREE.Quaternion(), sc = new THREE.Vector3(), pv = new THREE.Vector3();
@@ -224,7 +260,7 @@ scene.add(terrain);
     q0.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.random() * 6.28);
     m4.compose(pv, q0, sc);
     inst.setMatrixAt(n, m4);
-    col.setHSL(0.24 + Math.random() * 0.06, 0.32 + Math.random() * 0.2, 0.16 + Math.random() * 0.12);
+    col.setStyle(TREE_COLS[(Math.random() * TREE_COLS.length) | 0]);
     inst.setColorAt(n, col);
     n++;
   }
@@ -234,17 +270,57 @@ scene.add(terrain);
   scene.add(inst);
 }
 
+// --- nuages (sprites additifs, peu coûteux)
+{
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 128;
+  const g = cv.getContext('2d');
+  const grd = g.createRadialGradient(64, 64, 4, 64, 64, 64);
+  grd.addColorStop(0, 'rgba(255,255,255,0.95)');
+  grd.addColorStop(0.45, 'rgba(255,255,255,0.5)');
+  grd.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grd; g.fillRect(0, 0, 128, 128);
+  const tex = new THREE.CanvasTexture(cv);
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.92, fog: true });
+  const group = new THREE.Group();
+  for (let c = 0; c < 16; c++) {
+    const a = Math.random() * Math.PI * 2, rr = 900 + Math.random() * 8000;
+    const cx = Math.cos(a) * rr, cz = Math.sin(a) * rr, cy = 780 + Math.random() * 820;
+    const puffs = 4 + Math.floor(Math.random() * 4);
+    for (let i = 0; i < puffs; i++) {
+      const s = new THREE.Sprite(mat);
+      const sc = 420 + Math.random() * 560;
+      s.scale.set(sc, sc * 0.6, 1);
+      s.position.set(cx + (Math.random() - 0.5) * 950, cy + (Math.random() - 0.5) * 150, cz + (Math.random() - 0.5) * 950);
+      group.add(s);
+    }
+  }
+  scene.add(group);
+}
+
 // --- piste
 const runway = new THREE.Mesh(new THREE.BoxGeometry(RW_W, 0.6, RW_LEN),
   new THREE.MeshLambertMaterial({ color: 0x4a4e52 }));
 runway.position.set(0, RW_Y - 0.3, 0);
 scene.add(runway);
 const lineMat = new THREE.MeshBasicMaterial({ color: 0xe8e8e2 });
-for (let i = -14; i <= 14; i++) {
-  if (i % 2) continue;
-  const l = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 22).rotateX(-Math.PI / 2), lineMat);
-  l.position.set(0, RW_Y + 0.02, i * 42);
-  scene.add(l);
+const mk = (w, l, x, z) => {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, l).rotateX(-Math.PI / 2), lineMat);
+  m.position.set(x, RW_Y + 0.02, z);
+  scene.add(m);
+};
+// axe de piste
+for (let i = -14; i <= 14; i++) { if (i % 2) continue; mk(1.1, 22, 0, i * 42); }
+// lignes de rive
+mk(0.7, RW_LEN - 12, -(RW_W / 2 - 2.2), 0);
+mk(0.7, RW_LEN - 12, (RW_W / 2 - 2.2), 0);
+// seuils : bandes parallèles aux extrémités
+for (const end of [-1, 1]) {
+  for (let i = -3; i <= 3; i++) {
+    if (i === 0) continue;
+    mk(2.0, 26, i * 3.9, end * (RW_LEN / 2 - 32));
+  }
+  mk(RW_W - 8, 3.2, 0, end * (RW_LEN / 2 - 12));
 }
 
 /* ------------------------------------------------------------------ */
@@ -296,17 +372,35 @@ const aircraft = new THREE.Group();
 }
 scene.add(aircraft);
 
+// --- ombre portée au sol (repère visuel pour l'atterrissage)
+const shadowMesh = (() => {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 128;
+  const g = cv.getContext('2d');
+  const gr = g.createRadialGradient(64, 64, 6, 64, 64, 62);
+  gr.addColorStop(0, 'rgba(0,0,0,0.55)');
+  gr.addColorStop(0.6, 'rgba(0,0,0,0.28)');
+  gr.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  const m = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cv), transparent: true, depthWrite: false, opacity: 0.35 })
+  );
+  scene.add(m);
+  return m;
+})();
+
 /* ------------------------------------------------------------------ */
 /*  modèle de vol (6 degrés de liberté, coefficients type C172)        */
 /* ------------------------------------------------------------------ */
 const AC = {
-  m: 880, S: 16.2, b: 11.0, c: 1.5, g: 9.81,
-  CL0: 0.38, CLa: 5.6, CD0: 0.028, k: 0.048,
+  m: 820, S: 16.2, b: 11.0, c: 1.5, g: 9.81,
+  CL0: 0.44, CLa: 5.6, CD0: 0.028, k: 0.048,
   Cm0: 0.14, Cm_a: -1.0, Cm_de: 0.20, Cm_q: -24,
   Cl_b: -0.09, Cl_p: -0.5, Cl_da: 0.058, Cl_r: 0.06,
   Cn_b: 0.09, Cn_r: -0.12, Cn_dr: 0.032, Cn_da: -0.012,
   CY_b: -0.6, Tmax: 2600, nwLoad: 2300,
-  Ix: 1540, Iy: 2250, Iz: 1085       // tangage, lacet, roulis
+  Ix: 1450, Iy: 2120, Iz: 1020       // tangage, lacet, roulis
 };
 const GEAR_H = 1.15;
 const A_STALL = 0.28;                 // ~16 degrés
@@ -335,6 +429,7 @@ function reset() {
   target.elev = target.ail = target.rud = target.thr = 0;
   throttle = 0;
   crashed = false;
+  AC.Cm0 = 0.14;
   lastGh = groundAt(pos.x, pos.z);
   document.getElementById('msg').classList.remove('on');
 }
@@ -371,10 +466,17 @@ function step(dt) {
   if (aAbs < A_STALL) CL = AC.CL0 + AC.CLa * alpha;
   else {
     const peak = AC.CL0 + AC.CLa * A_STALL * sg;
-    CL = peak * Math.max(0.45, 1 - (aAbs - A_STALL) * 2.3);
+    CL = peak * Math.max(0.5, 1 - (aAbs - A_STALL) * 1.8);
   }
   const stall = clamp((aAbs - A_STALL) / 0.22, 0, 1);
   stallLevel = stall;
+
+  // auto-centrage : manche lâché, l'avion tient son assiette (comme un trim réel)
+  if (!onGround && Math.abs(ctrl.elev) < 0.07 && Math.abs(ctrl.ail) < 0.15 && !crashed) {
+    const want = clamp(alpha, -0.03, 0.19);
+    const cible = -AC.Cm_a * want;
+    AC.Cm0 += (cible - AC.Cm0) * (1 - Math.exp(-dt * 0.45));
+  }
 
   const CD = AC.CD0 + AC.k * CL * CL + 0.85 * stall * Math.abs(Math.sin(alpha));
 
@@ -412,7 +514,11 @@ function step(dt) {
   N += qbar * AC.S * AC.b * AC.Cn_dr * rudCmd;
 
   _T.set(M, -N, -L);
-  if (stall > 0.05) _T.z += -stall * 5200 * (beta >= 0 ? 1 : -1);   // chute d'aile
+  if (stall > 0.05) {
+    // chute d'aile : dépend du glissement, avec une légère instabilité
+    const wd = clamp(beta * 8, -1, 1) + 0.22 * Math.sin(simT * 2.3);
+    _T.z += -stall * 1300 * wd;
+  }
 
   _Iw.set(AC.Ix * omega.x, AC.Iy * omega.y, AC.Iz * omega.z);
   _cr.copy(omega).cross(_Iw);
@@ -498,6 +604,7 @@ function layout() {
 const inRect = (x, y, r) => x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1;
 
 canvas.addEventListener('pointerdown', e => {
+  initAudio();
   if (crashed) { reset(); return; }
   const L = layout(), x = e.clientX, y = e.clientY;
   if (inRect(x, y, L.rudL)) { rudTouch.on = true; rudTouch.id = e.pointerId; rudTouch.dir = -1; }
@@ -530,6 +637,16 @@ function endPointer(e) {
 }
 canvas.addEventListener('pointerup', endPointer);
 canvas.addEventListener('pointercancel', endPointer);
+canvas.addEventListener('lostpointercapture', endPointer);
+
+// sécurité : ne jamais laisser une commande bloquée si le doigt disparaît
+function releaseAll() {
+  stick.on = false; stick.id = null; stick.dx = 0; stick.dy = 0;
+  rudTouch.on = false; rudTouch.dir = 0; rudTouch.id = null;
+  thrTouch.on = false; thrTouch.id = null;
+}
+addEventListener('blur', releaseAll);
+document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAll(); });
 function setThrFromY(y, L) {
   throttle = clamp((L.thr.y1 - y) / (L.thr.y1 - L.thr.y0), 0, 1);
   document.getElementById('hint').classList.add('off');
@@ -537,6 +654,7 @@ function setThrFromY(y, L) {
 
 addEventListener('keydown', e => {
   if (e.repeat) return;
+  initAudio();
   keys.add(e.code);
   if (e.code === 'KeyR') reset();
   if (e.code === 'KeyC') cycleCam();
@@ -563,6 +681,7 @@ function keyboard() {
 /* ------------------------------------------------------------------ */
 let camMode = 0;
 const camPos = new THREE.Vector3(0, 30, 590);
+const hintEl = document.getElementById('hint');
 function cycleCam() { camMode = (camMode + 1) % 3; }
 document.getElementById('bcam').addEventListener('click', e => { e.stopPropagation(); cycleCam(); });
 document.getElementById('breset').addEventListener('click', e => { e.stopPropagation(); reset(); });
@@ -581,7 +700,7 @@ function updateCamera(dt) {
     aircraft.visible = true;
     const yaw = Math.atan2(-_fwd.x, -_fwd.z);
     const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0));
-    const off = camMode === 0 ? new THREE.Vector3(0, 4.6, 15) : new THREE.Vector3(7, 2.2, 3);
+    const off = camMode === 0 ? new THREE.Vector3(0, 4.4, 16) : new THREE.Vector3(7, 2.2, 3);
     const want = pos.clone().add(off.applyQuaternion(q));
     camPos.lerp(want, 1 - Math.exp(-dt * 6));
     camera.position.copy(camPos);
@@ -608,6 +727,144 @@ function updateHUD() {
   hudThr.innerHTML = (ctrl.thr * 100).toFixed(0) + '<small>%</small>';
   hudStall.classList.toggle('on', stallLevel > 0.15 && !onGround);
 }
+
+/* ---- horizon artificiel ---- */
+const ahCv = el('ah'), ah2d = ahCv.getContext('2d');
+const mapCvEl = el('map'), map2d = mapCvEl.getContext('2d');
+const MAP_N = 96;
+const mapTiles = document.createElement('canvas');
+mapTiles.width = mapTiles.height = MAP_N;
+let mapReady = false;
+
+function buildMap() {
+  const g = mapTiles.getContext('2d');
+  const img = g.createImageData(MAP_N, MAP_N);
+  const D = mapTiles;
+  for (let j = 0; j < MAP_N; j++) {
+    for (let i = 0; i < MAP_N; i++) {
+      const x = (i / (MAP_N - 1) - 0.5) * T_SIZE;
+      const z = (j / (MAP_N - 1) - 0.5) * T_SIZE;
+      const h = terrainHeight(x, z);
+      let r, gg, b;
+      if (h < 0)        { r = 24; gg = 62; b = 96; }
+      else if (h < 25)  { r = 156; gg = 172; b = 116; }
+      else if (h < 260) { r = 72; gg = 112; b = 64; }
+      else              { r = 134; gg = 130; b = 120; }
+      const k = (j * MAP_N + i) * 4;
+      img.data[k] = r; img.data[k + 1] = gg; img.data[k + 2] = b; img.data[k + 3] = 255;
+    }
+  }
+  g.putImageData(img, 0, 0);
+  mapReady = true;
+}
+
+function drawAH() {
+  const S = 150, C = S / 2, R = 60, c = ah2d;
+  c.clearRect(0, 0, S, S);
+  _fwd.set(0, 0, -1).applyQuaternion(quat);
+  _up.set(0, 1, 0).applyQuaternion(quat);
+  _right.set(1, 0, 0).applyQuaternion(quat);
+  const pitch = Math.asin(clamp(_fwd.y, -1, 1));
+  const bank = Math.atan2(-_right.y, _up.y);
+
+  c.save();
+  c.beginPath(); c.arc(C, C, R, 0, 6.2832); c.clip();
+  c.translate(C, C);
+  c.rotate(-bank);
+  c.translate(0, clamp(pitch / 0.55, -1.4, 1.4) * R);
+  c.fillStyle = '#2f74b0'; c.fillRect(-R * 2, -R * 4, R * 4, R * 4);
+  c.fillStyle = '#6b5a3e'; c.fillRect(-R * 2, 0, R * 4, R * 4);
+  c.strokeStyle = 'rgba(255,255,255,.95)'; c.lineWidth = 2;
+  c.beginPath(); c.moveTo(-R * 2, 0); c.lineTo(R * 2, 0); c.stroke();
+  c.strokeStyle = 'rgba(255,255,255,.40)'; c.lineWidth = 1.5;
+  for (let d = -30; d <= 30; d += 10) {
+    if (!d) continue;
+    const yy = -(d / 31.5) * R;
+    c.beginPath(); c.moveTo(-13, yy); c.lineTo(13, yy); c.stroke();
+  }
+  c.restore();
+
+  c.strokeStyle = 'rgba(200,225,245,.5)'; c.lineWidth = 2;
+  c.beginPath(); c.arc(C, C, R, 0, 6.2832); c.stroke();
+  c.strokeStyle = '#ffd24a'; c.lineWidth = 3;
+  c.beginPath();
+  c.moveTo(C - 24, C); c.lineTo(C - 9, C); c.lineTo(C - 5, C + 7);
+  c.moveTo(C + 24, C); c.lineTo(C + 9, C); c.lineTo(C + 5, C + 7);
+  c.stroke();
+  c.fillStyle = '#ffd24a';
+  c.beginPath(); c.arc(C, C, 2.6, 0, 6.2832); c.fill();
+}
+
+function drawMap() {
+  const S = 150, c = map2d;
+  c.clearRect(0, 0, S, S);
+  if (!mapReady) return;
+  c.save();
+  c.beginPath(); c.arc(S / 2, S / 2, S / 2 - 2, 0, 6.2832); c.clip();
+  c.drawImage(mapTiles, 0, 0, S, S);
+  const px = (pos.x / T_SIZE + 0.5) * S;
+  const py = (pos.z / T_SIZE + 0.5) * S;
+  c.save();
+  c.translate(px, py);
+  c.rotate(Math.atan2(_fwd.x, -_fwd.z));
+  c.beginPath(); c.moveTo(0, -8); c.lineTo(5.5, 7); c.lineTo(0, 3.5); c.lineTo(-5.5, 7); c.closePath();
+  c.fillStyle = '#ffcc44'; c.fill();
+  c.strokeStyle = 'rgba(0,0,0,.55)'; c.lineWidth = 1; c.stroke();
+  c.restore();
+  c.restore();
+  c.strokeStyle = 'rgba(200,225,245,.35)'; c.lineWidth = 2;
+  c.beginPath(); c.arc(S / 2, S / 2, S / 2 - 2, 0, 6.2832); c.stroke();
+  c.fillStyle = 'rgba(230,242,252,.85)'; c.font = 'bold 11px ui-monospace,monospace';
+  c.textAlign = 'center'; c.textBaseline = 'top';
+  c.fillText('N', S / 2, 5);
+}
+
+/* ---- son : moteur + vent (démarre au premier contact) ---- */
+let audio = null, muted = false;
+function initAudio() {
+  if (audio) { if (audio.ctx.state === 'suspended') audio.ctx.resume(); return; }
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  try {
+    const ctx = new Ctx();
+    const master = ctx.createGain(); master.gain.value = 0; master.connect(ctx.destination);
+    const o1 = ctx.createOscillator(); o1.type = 'sawtooth'; o1.frequency.value = 60;
+    const o2 = ctx.createOscillator(); o2.type = 'square'; o2.frequency.value = 31;
+    const eg = ctx.createGain(); eg.gain.value = 0;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 700; lp.Q.value = 0.7;
+    o1.connect(eg); o2.connect(eg); eg.connect(lp); lp.connect(master);
+    const len = Math.floor(ctx.sampleRate * 2);
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    const noise = ctx.createBufferSource(); noise.buffer = buf; noise.loop = true;
+    const nf = ctx.createBiquadFilter(); nf.type = 'bandpass'; nf.frequency.value = 600; nf.Q.value = 0.7;
+    const ng = ctx.createGain(); ng.gain.value = 0;
+    noise.connect(nf); nf.connect(ng); ng.connect(master);
+    o1.start(); o2.start(); noise.start();
+    audio = { ctx, master, o1, o2, eg, lp, ng, nf };
+    ctx.resume();
+  } catch (e) { audio = null; }
+}
+function updateAudio() {
+  if (!audio) return;
+  const t = audio.ctx.currentTime, thr = ctrl.thr, v = vel.length();
+  const rpm = 0.22 + 0.78 * thr;
+  audio.o1.frequency.setTargetAtTime(46 + 78 * rpm, t, 0.08);
+  audio.o2.frequency.setTargetAtTime(23 + 39 * rpm, t, 0.08);
+  audio.eg.gain.setTargetAtTime(0.05 + 0.13 * thr, t, 0.12);
+  audio.lp.frequency.setTargetAtTime(420 + 1900 * thr, t, 0.12);
+  audio.ng.gain.setTargetAtTime(0.015 + Math.min(v / 70, 1) * 0.10, t, 0.18);
+  audio.nf.frequency.setTargetAtTime(380 + v * 14, t, 0.18);
+  audio.master.gain.setTargetAtTime(muted ? 0 : 0.55, t, 0.12);
+}
+el('bson').addEventListener('click', e => {
+  e.stopPropagation();
+  muted = !muted;
+  if (!muted) initAudio();
+  el('bson').textContent = muted ? 'MUET' : 'SON';
+  el('bson').style.opacity = muted ? '.55' : '1';
+});
 
 function roundRect(x, y, w, h, r) {
   ctl2d.beginPath();
@@ -699,7 +956,7 @@ function drawControls() {
 /*  boucle                                                             */
 /* ------------------------------------------------------------------ */
 const FIXED = 1 / 120;
-let acc = 0, last = performance.now(), fpsT = 0, fpsN = 0;
+let acc = 0, last = performance.now(), fpsT = 0, fpsN = 0, frameN = 0;
 
 function frame(now) {
   const dtReal = Math.min((now - last) / 1000, 0.25);
@@ -713,6 +970,7 @@ function frame(now) {
   target.ail  = clamp(ex(stick.on ? stick.dx : kb.a), -1, 1);
   if (kb.t !== null) throttle = lerp(throttle, kb.t, 0.08);
   target.thr = throttle;
+  if (throttle > 0.06) hintEl.classList.add('off');
   if (rudTouch.on) target.rud = rudTouch.dir;
   else if (K('KeyQ') || K('KeyE')) target.rud = kb.r;
   else target.rud = 0;
@@ -729,7 +987,21 @@ function frame(now) {
   updateCamera(dtReal);
   sky.position.copy(camera.position);
   updateHUD();
+
+  // ombre portée : aide à juger la hauteur avant l'atterrissage
+  {
+    const gy = groundAt(pos.x, pos.z) + 0.12;
+    const agl = clamp(pos.y - gy, 0, 250);
+    shadowMesh.position.set(pos.x, gy, pos.z);
+    const sc = 13 + agl * 0.09;
+    shadowMesh.scale.set(sc, 1, sc * 1.15);
+    shadowMesh.material.opacity = 0.34 * clamp(1 - agl / 120, 0.08, 1);
+    shadowMesh.rotation.y = Math.atan2(-_fwd.x, -_fwd.z);
+  }
+
   drawControls();
+  drawAH();
+  if ((frameN++ & 3) === 0) { drawMap(); updateAudio(); }
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
@@ -746,6 +1018,7 @@ document.getElementById('msg').addEventListener('pointerdown', () => reset());
 reset();
 camPos.set(pos.x, pos.y + 12, pos.z + 30);
 requestAnimationFrame(frame);
+setTimeout(buildMap, 400);
 
 /* sonde de diagnostic (utilisée par les tests, sans effet sur le jeu) */
 window.__dbg = () => {
