@@ -331,7 +331,7 @@ for (const end of [-1, 1]) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  flotte : trois appareils aux comportements distincts               */
+/*  flotte : appareils aux comportements distincts                     */
 /* ------------------------------------------------------------------ */
 const PLANES = [
   {
@@ -375,6 +375,20 @@ const PLANES = [
       finH: 1.9, finChord: 1.5, finZ: 5.15, can: [0.52, 0.28, 1.6, 0.5, -3.0],
       prop: 0, gear: true, nacelle: true, strut: false, stabY: 1.85,
       body: 0xeef1f5, accent: 0x2f6fb8, trim: 0x22262c }
+  },
+  {
+    name: 'Avion de chasse',
+    perf: { m: 4200, S: 28, b: 9.5, c: 3.2, CL0: 0.12, CLa: 4.8, CD0: 0.024, k: 0.06,
+      Cm0: 0.04, Cm_a: -1.35, Cm_de: 0.32, Cm_q: -22,
+      Cl_b: -0.08, Cl_p: -0.55, Cl_da: 0.095, Cl_r: 0.04,
+      Cn_b: 0.12, Cn_r: -0.14, Cn_dr: 0.045, Cn_da: -0.015,
+      CY_b: -0.7, Tmax: 52000, Vmax: 230, nwLoad: 4200,
+      Ix: 5200, Iy: 28000, Iz: 24000 },
+    look: { len: 14.5, rmax: 0.85, span: 9.5, chord: 3.4, taper: 0.35, sweep: 3.2, dihedral: -0.05,
+      wingZ: 0.9, wingY: -0.2, tailSpan: 4.8, tailChord: 1.4, tailZ: 6.2,
+      finH: 2.2, finChord: 1.7, finZ: 6.1, can: [0.48, 0.32, 1.8, 0.55, -4.2],
+      prop: 0, gear: true, nacelle: false, strut: false, stabY: 0.18, nozzle: true,
+      body: 0x6b7682, accent: 0xf0c040, trim: 0x2a2f36 }
   }
 ];
 
@@ -523,6 +537,21 @@ function buildPlane(P) {
       inl.position.set(sx * L.span * 0.24, L.wingY - 0.42, L.wingZ - 1.86);
       inl.rotation.y = Math.PI;
       g.add(inl);
+    }
+  }
+  if (L.nozzle) {
+    const noz = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.36, 1.6, 12, 1, true), matDark);
+    noz.rotation.x = Math.PI / 2;
+    noz.position.set(0, 0.05, half - 0.55);
+    g.add(noz);
+    const core = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.9, 10), matAcc);
+    core.rotation.x = Math.PI / 2;
+    core.position.set(0, 0.05, half - 0.2);
+    g.add(core);
+    for (const sx of [-1, 1]) {
+      const intake = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.55, 2.4), matBody);
+      intake.position.set(sx * 0.55, -0.18, -half * 0.15);
+      g.add(intake);
     }
   }
   return g;
