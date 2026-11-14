@@ -377,7 +377,7 @@ function groundAt(x, z) {
 /*  rendu                                                              */
 /* ------------------------------------------------------------------ */
 const canvas = document.getElementById('c');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', logarithmicDepthBuffer: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
 renderer.setSize(innerWidth, innerHeight, false);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -522,6 +522,8 @@ const waterMat = new THREE.ShaderMaterial({
   transparent: false,
   uniforms: { sunDir: { value: SUN_DIR }, time: { value: 0 }, deep: { value: new THREE.Color(0x163a58) }, shallow: { value: new THREE.Color(0x2f7da8) } },
   vertexShader: `
+    #include <common>
+    #include <logdepthbuf_pars_vertex>
     varying vec3 vW; varying vec3 vN;
     uniform float time;
     void main(){
@@ -532,11 +534,14 @@ const waterMat = new THREE.ShaderMaterial({
       vN = normalize(normalMatrix * vec3(-cos(p.x*0.004+time*0.7)*0.004, 1.0, sin(p.z*0.0035-time*0.6)*0.0035));
       vec4 wp = modelMatrix * vec4(p,1.0); vW = wp.xyz;
       gl_Position = projectionMatrix * viewMatrix * wp;
+      #include <logdepthbuf_vertex>
     }`,
   fragmentShader: `
+    #include <logdepthbuf_pars_fragment>
     uniform vec3 sunDir; uniform vec3 deep; uniform vec3 shallow; uniform float time;
     varying vec3 vW; varying vec3 vN;
     void main(){
+      #include <logdepthbuf_fragment>
       vec3 V = normalize(cameraPosition - vW);
       vec3 N = normalize(vN);
       float fres = pow(1.0 - max(dot(N,V), 0.0), 4.0);
@@ -585,6 +590,7 @@ const tGeo = new THREE.PlaneGeometry(T_SIZE, T_SIZE, T_SEG, T_SEG).rotateX(-Math
     const x = p.getX(i), z = p.getZ(i);
     let y = terrainHeight(x, z);
     if (canyonDist(x, z) < CANYON.rw + 60) y -= 45;          // caché sous les parois détaillées du canyon
+    else if (y < -0.4) y = -0.4 + (y + 0.4) * 2.5 - 1.5;     // fond marin écarté de la surface (anti-scintillement)
     p.setY(i, y);
   }
   tGeo.computeVertexNormals();
@@ -866,7 +872,7 @@ const cityNight = { value: 0 };
   const step = 2;                                     // un rang tous les ~80 m
   const rows = Math.floor((P.length - 1) / step) + 1;
   const pos = new Float32Array(rows * (COLS + 1) * 3), colA = new Float32Array(rows * (COLS + 1) * 3);
-  const STRATA = [0xb4532e, 0xc8743f, 0xa4462c, 0xd9a066, 0xb86a3c, 0xe2c08a, 0x9b4a30, 0xc98a52].map(h => new THREE.Color(h));
+  const STRATA = [0x857a6c, 0x938674, 0x7a7064, 0x9c8f7c, 0x8a7e6e, 0xa39782, 0x766c60, 0x8f8370].map(h => new THREE.Color(h));
   const cGrass = new THREE.Color(0x4e7a45), cRock = new THREE.Color(0x7a756c), cSand = new THREE.Color(0xd6c49a), tmp = new THREE.Color();
   for (let r = 0; r < rows; r++) {
     const k = Math.min(r * step, P.length - 2);
@@ -880,7 +886,7 @@ const cityNight = { value: 0 };
       pos[i] = x; pos[i + 1] = y; pos[i + 2] = z;
       const d = Math.abs(s);
       const band = STRATA[((Math.floor((y + 40) / 34) % STRATA.length) + STRATA.length) % STRATA.length];
-      tmp.copy(band).multiplyScalar(0.86 + 0.28 * fbm(x * 0.01, y * 0.03, 2));
+      tmp.copy(band).lerp(cRock, 0.25).multiplyScalar(0.84 + 0.3 * fbm(x * 0.01, y * 0.03, 2));
       const outer = smoothstep(CANYON.rw - 40, HW - 20, d);     // vers le bord : couleur du terrain normal
       const terr = new THREE.Color().copy(cGrass).lerp(cRock, smoothstep(200, 520, y));
       if (y < 6) tmp.copy(cSand);
@@ -1021,6 +1027,7 @@ function updateDecor(dt) {
 
 // --- nuages (sprites additifs, peu coûteux)
 const cloudMats = [];
+const _cR = new THREE.Vector3(), _cU = new THREE.Vector3();
 {
   const cv = document.createElement('canvas');
   cv.width = cv.height = 128;
@@ -1032,9 +1039,16 @@ const cloudMats = [];
   g.fillStyle = grd; g.fillRect(0, 0, 128, 128);
   const tex = new THREE.CanvasTexture(cv);
   const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.88, fog: true });
-  const mat2 = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.55, fog: true, color: 0xeef6ff });
+  const mat2 = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.55, fog: true });
   mat.userData.dayOpacity = 0.88; mat2.userData.dayOpacity = 0.55;
   cloudMats.push(mat, mat2);
+  for (const m of [mat, mat2]) {
+    m.onBeforeCompile = sh => {
+      sh.vertexShader = 'varying float vCD;\n' + sh.vertexShader.replace('#include <fog_vertex>', '#include <fog_vertex>\n vCD = -mvPosition.z;');
+      sh.fragmentShader = 'varying float vCD;\n' + sh.fragmentShader.replace('#include <fog_fragment>', 'gl_FragColor.a *= smoothstep(80.0, 520.0, vCD);\n#include <fog_fragment>');
+    };
+    m.customProgramCacheKey = () => 'cloudfade';
+  }
   const group = new THREE.Group();
   for (let c = 0; c < 80; c++) {
     const a = Math.random() * Math.PI * 2, rr = 700 + Math.random() * 26000;
@@ -2577,6 +2591,11 @@ function frame(now) {
   if (typeof drawCombatOverlay === 'function') drawCombatOverlay();
   drawAH();
   if ((frameN++ & 3) === 0) { drawMap(); updateAudio(); }
+  {   // les nuages restent horizontaux quand l'avion s'incline
+    _cR.set(1, 0, 0).applyQuaternion(camera.quaternion); _cU.set(0, 1, 0).applyQuaternion(camera.quaternion);
+    const roll = -Math.atan2(_cR.y, _cU.y);
+    for (const m of cloudMats) m.rotation = roll;
+  }
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
