@@ -72,6 +72,7 @@
   <button id="bcam">VUE</button>
   <button id="bnuit">NUIT</button>
   <button id="bson">SON</button>
+  <button id="bpiste">PISTE</button>
   <button id="breset">RESET</button>
 </div>
 <div id="toast"></div>
@@ -109,7 +110,7 @@ function fbm(x, y, oct) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  terrain : une île de ~15 km, aéroport à deux pistes reliées        */
+/*  terrain : grande île de ~22 km + archipel, deux aéroports        */
 /* ------------------------------------------------------------------ */
 const RW_Y = 4.2;          // altitude des surfaces bétonnées
 const PL_Y = RW_Y - 0.35;  // plaine autour, juste en dessous
@@ -117,7 +118,8 @@ const PL_Y = RW_Y - 0.35;  // plaine autour, juste en dessous
 // Surfaces dures : pistes, taxiways, aires (rectangles axis-aligned en x/z)
 const RUNWAYS = [
   { x: 0, z: 0, w: 36, l: 1400, name: '18/36' },      // piste nord-sud
-  { x: 0, z: 80, w: 1000, l: 30, name: '09/27' }      // piste est-ouest croisant la première
+  { x: 0, z: 80, w: 1000, l: 30, name: '09/27' },     // piste est-ouest croisant la première
+  { x: -12500, z: -10500, w: 34, l: 1300, name: '04/22' } // aérodrome de l'île du Nord-Ouest
 ];
 const TAXIWAYS = [
   { x: -260, z: -520, w: 18, l: 420 },
@@ -125,8 +127,15 @@ const TAXIWAYS = [
   { x: 260, z: 520, w: 18, l: 420 },
   { x: 260, z: 310, w: 260, l: 18 },
   { x: 0, z: -310, w: 520, l: 18 },
-  { x: 0, z: 310, w: 520, l: 18 }
+  { x: 0, z: 310, w: 520, l: 18 },
+  { x: -12420, z: -10500, w: 160, l: 18 },             // bretelle aérodrome NO
+  { x: -12340, z: -10500, w: 18, l: 220 }
 ];
+const AIRPORTS = [
+  { name: 'Aéroport principal', x: 0, z: 560, hdg: 0 },
+  { name: 'Aérodrome Nord-Ouest', x: -12500, z: -9950, hdg: 0 }
+];
+var airportIdx = 0;
 const HARD = [...RUNWAYS, ...TAXIWAYS];
 
 function inRectXZ(x, z, r) { return Math.abs(x - (r.x||0)) < r.w/2 && Math.abs(z - (r.z||0)) < r.l/2; }
@@ -135,10 +144,16 @@ const onRunway = onHardSurface; // compat
 
 // îlots au large, pour un horizon moins vide
 const ISLETS = [
-  { x: 6200, z: -4200, r: 1500, h: 120 },
-  { x: -6800, z: -2600, r: 1900, h: 170 },
-  { x: 2100, z: 7400, r: 1200, h: 90 }
+  { x: 10500, z: -7200, r: 2200, h: 160 },
+  { x: -9800, z: 2600, r: 1900, h: 170 },
+  { x: 4200, z: 13200, r: 2600, h: 240 },
+  { x: 14200, z: 6800, r: 1600, h: 110 },
+  { x: -4600, z: -15200, r: 1400, h: 90 },
+  { x: 15600, z: -14600, r: 1300, h: 80 },
+  { x: -15400, z: 12600, r: 2000, h: 140 }
 ];
+// grande île secondaire (relief doux) qui porte le 2e aérodrome
+const ISLAND2 = { x: -12000, z: -10200, r: 4600 };
 
 function airportMask(x, z) {
   // zone aplatie couvrant les deux pistes et les taxiways
@@ -146,12 +161,14 @@ function airportMask(x, z) {
   const d2 = Math.max(Math.abs(x) - 580, Math.abs(z - 80) - 70);
   const d3 = Math.max(Math.abs(x) - 320, Math.abs(z) - 360);
   const d = Math.min(d1, d2, d3);
-  return 1 - smoothstep(40, 260, d);
+  // aérodrome Nord-Ouest
+  const d4 = Math.max(Math.abs(x + 12460) - 140, Math.abs(z + 10500) - 760);
+  return Math.max(1 - smoothstep(40, 260, d), 1 - smoothstep(40, 420, d4));
 }
 
 function terrainHeight(x, z) {
   const r = Math.hypot(x, z);
-  const R = 7800;
+  const R = 11500;
   let mask = 1 - smoothstep(R * 0.55, R, r);
   mask = Math.pow(mask, 1.2);
   const mtn = smoothstep(2300, 4600, r);          // relief repoussé loin de la piste
@@ -163,9 +180,19 @@ function terrainHeight(x, z) {
 
   for (const is of ISLETS) {
     const dd = Math.hypot(x - is.x, z - is.z);
-    if (dd < is.r) {
-      const f = 1 - dd / is.r;
-      h = Math.max(h, -30 + f * f * (is.h + 45));
+    const rr = is.r * (0.82 + 0.36 * fbm(x * 0.0006 + is.x, z * 0.0006 - is.z, 3)); // côtes irrégulières
+    if (dd < rr) {
+      const f = 1 - dd / rr;
+      h = Math.max(h, -30 + f * f * (is.h + 45) * (0.7 + 0.6 * fbm(x * 0.002, z * 0.002, 3)));
+    }
+  }
+  {
+    const dd = Math.hypot(x - ISLAND2.x, z - ISLAND2.z);
+    const rr = ISLAND2.r * (0.8 + 0.4 * fbm(x * 0.00045 + 7.7, z * 0.00045 + 1.9, 4));
+    if (dd < rr) {
+      const f = smoothstep(0, 0.35, 1 - dd / rr);
+      const hills = 8 + fbm(x * 0.0005 - 2.3, z * 0.0005 + 6.1, 4) * 260 * smoothstep(1300, 2600, Math.hypot(x + 12460, z + 10500));
+      h = Math.max(h, lerp(-30, hills, f));
     }
   }
 
@@ -199,7 +226,7 @@ const SKY_BOT = new THREE.Color(0xcfe0ee);
 const SKY_TOP = new THREE.Color(0x3f74ad);
 scene.fog = new THREE.FogExp2(0xc9dceb, 0.000038);
 
-const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.5, 30000);
+const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.5, 60000);
 
 const SUN_DIR = new THREE.Vector3(-0.42, 0.66, 0.36).normalize();
 const MOON_DIR = new THREE.Vector3(0.25, 0.55, -0.35).normalize();
@@ -358,7 +385,7 @@ const waterMat = new THREE.ShaderMaterial({
     }`
 });
 const water = new THREE.Mesh(
-  new THREE.PlaneGeometry(60000, 60000, 1, 1).rotateX(-Math.PI / 2),
+  new THREE.PlaneGeometry(160000, 160000, 1, 1).rotateX(-Math.PI / 2),
   waterMat
 );
 water.position.y = -0.15;
@@ -366,7 +393,7 @@ water.receiveShadow = true;
 scene.add(water);
 
 // --- relief
-const T_SIZE = 18000, T_SEG = 256;
+const T_SIZE = 36000, T_SEG = 448;
 
 function groundTexture() {
   const S = 512, cv = document.createElement('canvas');
@@ -380,7 +407,7 @@ function groundTexture() {
   }
   const t = new THREE.CanvasTexture(cv);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.repeat.set(230, 230);
+  t.repeat.set(460, 460);
   t.anisotropy = 4;
   return t;
 }
@@ -421,7 +448,7 @@ scene.add(terrain);
 // --- forêt (instanciée : un seul appel de dessin)
 const TREE_COLS = ['#1e3a1a', '#2a4a22', '#33531f', '#254127', '#1b3320'];
 {
-  const N = 5200;
+  const N = 12000;
   const geo = new THREE.ConeGeometry(2.2, 11.0, 6);
   geo.translate(0, 5.5, 0);
   const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
@@ -430,9 +457,15 @@ const TREE_COLS = ['#1e3a1a', '#2a4a22', '#33531f', '#254127', '#1b3320'];
   const col = new THREE.Color();
   let n = 0, guard = 0;
   while (n < N && guard++ < N * 40) {
-    const a = Math.random() * Math.PI * 2;
-    const rr = 700 + Math.random() * 4600;
-    const x = Math.cos(a) * rr, z = Math.sin(a) * rr;
+    let x, z;
+    if (Math.random() < 0.22) {   // forêts de l'île Nord-Ouest
+      const a = Math.random() * Math.PI * 2, rr = Math.random() * ISLAND2.r;
+      x = ISLAND2.x + Math.cos(a) * rr; z = ISLAND2.z + Math.sin(a) * rr;
+    } else {
+      const a = Math.random() * Math.PI * 2;
+      const rr = 700 + Math.random() * 9800;
+      x = Math.cos(a) * rr; z = Math.sin(a) * rr;
+    }
     const h = terrainHeight(x, z);
     if (h < 3 || h > 520) continue;
     // pas d'arbres sur l'aéroport
@@ -470,8 +503,8 @@ const cloudMats = [];
   mat.userData.dayOpacity = 0.88; mat2.userData.dayOpacity = 0.55;
   cloudMats.push(mat, mat2);
   const group = new THREE.Group();
-  for (let c = 0; c < 22; c++) {
-    const a = Math.random() * Math.PI * 2, rr = 700 + Math.random() * 8200;
+  for (let c = 0; c < 52; c++) {
+    const a = Math.random() * Math.PI * 2, rr = 700 + Math.random() * 17000;
     const cx = Math.cos(a) * rr, cz = Math.sin(a) * rr, cy = 720 + Math.random() * 1100;
     const puffs = 5 + Math.floor(Math.random() * 6);
     for (let i = 0; i < puffs; i++) {
@@ -628,6 +661,16 @@ for (const t of TAXIWAYS) {
   for (const end of [-1, 1]) {
     for (let i = -2; i <= 2; i++) { if (!i) continue; mk(26, 2.0, r.x + end * (r.w/2 - 32), r.z + i * 3.6); }
     mk(3.2, r.l - 6, r.x + end * (r.w/2 - 12), r.z);
+  }
+}
+// marquages aérodrome Nord-Ouest
+{
+  const r = RUNWAYS[2];
+  for (let i = -14; i <= 14; i++) { if (i % 2) continue; mk(1.1, 22, r.x, r.z + i * 42); }
+  mk(0.7, r.l - 12, r.x - r.w/2 + 2.2, r.z); mk(0.7, r.l - 12, r.x + r.w/2 - 2.2, r.z);
+  for (const end of [-1, 1]) {
+    for (let i = -3; i <= 3; i++) { if (!i) continue; mk(2.0, 26, r.x + i * 4.1, r.z + end * (r.l/2 - 32)); }
+    mk(r.w - 8, 3.2, r.x, r.z + end * (r.l/2 - 12));
   }
 }
 // --- lumières de nuit : nuages de points lumineux (peu coûteux)
@@ -1138,6 +1181,9 @@ const pos   = new THREE.Vector3(0, RW_Y + GEAR_H, 560);
 const vel   = new THREE.Vector3();
 const quat  = new THREE.Quaternion();
 const omega = new THREE.Vector3();
+// état précédent / rendu interpolé (supprime le tremblement dû au pas fixe de la physique)
+const prevPos = new THREE.Vector3(), prevQuat = new THREE.Quaternion();
+const rPos = new THREE.Vector3(), rQuat = new THREE.Quaternion();
 
 const ctrl   = { elev: 0, ail: 0, rud: 0, thr: 0 };
 const target = { elev: 0, ail: 0, rud: 0, thr: 0 };
@@ -1154,7 +1200,8 @@ const _Iw = new THREE.Vector3(), _cr = new THREE.Vector3(), _fwd = new THREE.Vec
 
 function reset() {
   const h = gearEffectiveH();
-  pos.set(0, RW_Y + GEAR_H, 560);
+  const ap0 = AIRPORTS[airportIdx];
+  pos.set(ap0.x, RW_Y + GEAR_H, ap0.z);
   vel.set(0, 0, 0);
   quat.identity();
   omega.set(0, 0, 0);
@@ -1168,6 +1215,8 @@ function reset() {
   lastGh = groundAt(pos.x, pos.z);
   if (typeof resetContrails === 'function') resetContrails();
   if (typeof resetGroundFx === 'function') resetGroundFx();
+  prevPos.copy(pos); prevQuat.copy(quat); rPos.copy(pos); rQuat.copy(quat);
+  camInit = false;
   document.getElementById('msg').classList.remove('on');
 }
 
@@ -1295,7 +1344,7 @@ function step(dt) {
   const wasAir = !onGround;
   const effH = gearEffectiveH();
   onGround = false;
-  if (gh > lastGh + 0.35 && Math.hypot(vel.x, vel.z) > 10) crash();   // relief qui monte trop vite
+  if (gh > lastGh + 0.35 && Math.hypot(vel.x, vel.z) > 10 && pos.y < gh + effH + 0.6) crash();   // relief qui monte trop vite (seulement au ras du sol)
   lastGh = gh;
   if (pos.y < gh + effH) {
     const impact = vel.y;
@@ -1452,10 +1501,17 @@ function keyboard() {
 /* ------------------------------------------------------------------ */
 let camMode = 0;
 const camPos = new THREE.Vector3(0, 30, 590);
+const _shR = new THREE.Vector3(), _shU = new THREE.Vector3(), _shP = new THREE.Vector3(), _worldUp = new THREE.Vector3(0, 1, 0);
 const hintEl = document.getElementById('hint');
 function cycleCam() { camMode = (camMode + 1) % 3; }
 document.getElementById('bcam').addEventListener('click', e => { e.stopPropagation(); cycleCam(); });
 document.getElementById('breset').addEventListener('click', e => { e.stopPropagation(); reset(); });
+document.getElementById('bpiste').addEventListener('click', e => {
+  e.stopPropagation();
+  airportIdx = (airportIdx + 1) % AIRPORTS.length;
+  reset();
+  toast(AIRPORTS[airportIdx].name);
+});
 document.getElementById('bnuit').addEventListener('click', e => { e.stopPropagation(); toggleNight(); });
 document.getElementById('bgear').addEventListener('click', e => { e.stopPropagation(); toggleGear(); });
 
@@ -1484,24 +1540,41 @@ function closePlaneMenu() { const m=document.getElementById('pmenu'); m.classLis
 document.getElementById('bplane').addEventListener('click', e => { e.stopPropagation(); initAudio(); openPlaneMenu(); });
 
 const _up = new THREE.Vector3(), _right = new THREE.Vector3();
+const camLook = new THREE.Vector3(), _camQ = new THREE.Quaternion(), _camE = new THREE.Euler();
+const _camOff = new THREE.Vector3(), _camWant = new THREE.Vector3(), _camLookWant = new THREE.Vector3();
+var camYaw = null, camInit = false;
 function updateCamera(dt) {
-  _fwd.set(0, 0, -1).applyQuaternion(quat);
-  _up.set(0, 1, 0).applyQuaternion(quat);
-  _right.set(1, 0, 0).applyQuaternion(quat);
+  _fwd.set(0, 0, -1).applyQuaternion(rQuat);
+  _up.set(0, 1, 0).applyQuaternion(rQuat);
+  _right.set(1, 0, 0).applyQuaternion(rQuat);
 
   if (camMode === 1) {
-    camera.position.copy(pos).addScaledVector(_fwd, 0.7).addScaledVector(_up, 0.85).addScaledVector(_right, -0.35);
-    camera.lookAt(pos.clone().addScaledVector(_fwd, 60).addScaledVector(_up, 0.6));
+    // cockpit : rigidement lié à l'avion (pose interpolée => pas de saccades)
+    camera.position.copy(rPos).addScaledVector(_fwd, 0.7).addScaledVector(_up, 0.85).addScaledVector(_right, -0.35);
+    camera.up.copy(_up);
+    camera.lookAt(_camLookWant.copy(rPos).addScaledVector(_fwd, 60).addScaledVector(_up, 0.6));
     aircraft.visible = false;
+    camInit = false;
   } else {
     aircraft.visible = true;
-    const yaw = Math.atan2(-_fwd.x, -_fwd.z);
-    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0));
-    const off = camMode === 0 ? new THREE.Vector3(0, 4.4, 16) : new THREE.Vector3(7, 2.2, 3);
-    const want = pos.clone().add(off.applyQuaternion(q));
-    camPos.lerp(want, 1 - Math.exp(-dt * 6));
+    camera.up.set(0, 1, 0);
+    // cap lissé (évite les à-coups quand le cap change vite, ex. en looping)
+    const yawNow = Math.atan2(-_fwd.x, -_fwd.z);
+    if (camYaw === null || !camInit) camYaw = yawNow;
+    let dy = yawNow - camYaw;
+    dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+    if (Math.hypot(_fwd.x, _fwd.z) > 0.15) camYaw += dy * (1 - Math.exp(-dt * 8));
+    _camQ.setFromEuler(_camE.set(0, camYaw, 0));
+    if (camMode === 0) _camOff.set(0, 4.4, 16); else _camOff.set(7, 2.2, 3);
+    _camWant.copy(rPos).add(_camOff.applyQuaternion(_camQ));
+    _camLookWant.copy(rPos).addScaledVector(_fwd, 12).addScaledVector(_up, 1.2);
+    if (!camInit) { camPos.copy(_camWant); camLook.copy(_camLookWant); camInit = true; }
+    // la caméra suit en position relative à l'avion => seul le décalage est lissé, jamais le mouvement de l'avion
+    const kP = 1 - Math.exp(-dt * 6), kL = 1 - Math.exp(-dt * 14);
+    camPos.lerp(_camWant, kP);
+    camLook.lerp(_camLookWant, kL);
     camera.position.copy(camPos);
-    camera.lookAt(pos.clone().addScaledVector(_fwd, 12).addScaledVector(_up, 1.2));
+    camera.lookAt(camLook);
   }
 }
 
@@ -1528,7 +1601,7 @@ function updateHUD() {
 /* ---- horizon artificiel ---- */
 const ahCv = el('ah'), ah2d = ahCv.getContext('2d');
 const mapCvEl = el('map'), map2d = mapCvEl.getContext('2d');
-const MAP_N = 96;
+const MAP_N = 160;
 const mapTiles = document.createElement('canvas');
 mapTiles.width = mapTiles.height = MAP_N;
 let mapReady = false;
@@ -1794,11 +1867,21 @@ function frame(now) {
   if (!crashed) {
     acc += Math.min(dtReal, 0.1);
     let guard = 0;
-    while (acc >= FIXED && guard++ < 16) { step(FIXED); acc -= FIXED; }
-    if (acc > 0.2) acc = 0;
+    while (acc >= FIXED && guard++ < 16) {
+      prevPos.copy(pos); prevQuat.copy(quat);
+      step(FIXED); acc -= FIXED;
+    }
+    if (acc > FIXED) acc = 0;
   } else {
     acc = 0;
+    prevPos.copy(pos); prevQuat.copy(quat);
   }
+  // pose affichée = interpolation entre les deux derniers pas physiques
+  const alphaI = clamp(acc / FIXED, 0, 1);
+  rPos.lerpVectors(prevPos, pos, alphaI);
+  rQuat.slerpQuaternions(prevQuat, quat, alphaI);
+  aircraft.position.copy(rPos);
+  aircraft.quaternion.copy(rQuat);
 
   updateCamera(dtReal);
   sky.position.copy(camera.position);
@@ -1806,17 +1889,24 @@ function frame(now) {
 
   // ombre portée + ombres dynamiques qui suivent l'avion
   {
-    const gy = groundAt(pos.x, pos.z) + 0.12;
-    const agl = clamp(pos.y - gy, 0, 250);
-    shadowMesh.position.set(pos.x, gy, pos.z);
+    const gy = groundAt(rPos.x, rPos.z) + 0.12;
+    const agl = clamp(rPos.y - gy, 0, 250);
+    shadowMesh.position.set(rPos.x, gy, rPos.z);
     const sc = 13 + agl * 0.09;
     shadowMesh.scale.set(sc, 1, sc * 1.15);
     shadowMesh.material.opacity = 0.22 * clamp(1 - agl / 120, 0.06, 1);
     shadowMesh.rotation.y = Math.atan2(-_fwd.x, -_fwd.z);
 
-    sun.target.position.copy(pos);
+    // cadre d'ombre aligné sur la grille des texels : supprime le scintillement des ombres
+    const LD = isNight ? MOON_DIR : SUN_DIR;
+    _shR.crossVectors(LD, _worldUp).normalize(); _shU.crossVectors(_shR, LD).normalize();
+    const texel = (2 * S_SH) / sun.shadow.mapSize.x;
+    const a = Math.round(rPos.dot(_shR) / texel) * texel, b = Math.round(rPos.dot(_shU) / texel) * texel;
+    const c = rPos.dot(LD);
+    _shP.copy(_shR).multiplyScalar(a).addScaledVector(_shU, b).addScaledVector(LD, c);
+    sun.target.position.copy(_shP);
     sun.target.updateMatrixWorld();
-    sun.position.copy(pos).addScaledVector(isNight ? MOON_DIR : SUN_DIR, 800);
+    sun.position.copy(_shP).addScaledVector(LD, 800);
   }
   waterMat.uniforms.time.value = simT;
   skyMat.uniforms.time.value = simT;
@@ -1857,6 +1947,7 @@ window.__setState = (s) => {
   if (s.throttle != null) { throttle = s.throttle; ctrl.thr = s.throttle; target.thr = s.throttle; }
   if (s.cm0 != null) AC.Cm0 = s.cm0;
   lastGh = groundAt(pos.x, pos.z);
+  prevPos.copy(pos); prevQuat.copy(quat); camInit = false;
 };
 window.__dbg = () => {
   _fwd.set(0, 0, -1).applyQuaternion(quat);
