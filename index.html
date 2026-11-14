@@ -17,14 +17,15 @@
     background:rgba(8,14,20,.62);color:#dbe9f5;font-size:13px;letter-spacing:.02em;white-space:nowrap;
     pointer-events:none;transition:opacity .5s;border:1px solid rgba(255,255,255,.12)}
   #hint.off{opacity:0}
-  #hud{position:absolute;left:14px;top:14px;padding:10px 12px;border-radius:10px;
+  :root{--st:calc(max(env(safe-area-inset-top,0px),22px) + 10px)}
+  #hud{position:absolute;left:14px;top:var(--st);padding:10px 12px;border-radius:10px;
     background:rgba(8,14,20,.55);backdrop-filter:blur(6px);color:#dbe9f5;font-size:13px;line-height:1.45;
     pointer-events:none;min-width:152px}
   #hud .r{display:flex;justify-content:space-between;gap:14px}
   #hud .k{opacity:.55;letter-spacing:.06em;font-size:11px;padding-top:2px}
   #hud .v{font-variant-numeric:tabular-nums;font-weight:600}
   #hud .v small{opacity:.5;font-weight:400;font-size:10px}
-  #btns{position:absolute;right:12px;top:12px;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;max-width:calc(50vw - 84px)}
+  #btns{position:absolute;right:12px;top:var(--st);display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;max-width:calc(50vw - 84px)}
   #btns button{font:inherit;font-size:11px;letter-spacing:.05em;color:#cfe0ef;background:rgba(8,14,20,.55);
     border:1px solid rgba(255,255,255,.16);border-radius:8px;padding:8px 10px;touch-action:none}
   #btns button:active{background:rgba(255,255,255,.12)}
@@ -44,15 +45,15 @@
   #pmenu .pi{font:inherit;color:#dfeefb;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:10px;text-align:left}
   #pmenu .pi:active,#pmenu .pi.sel{background:rgba(120,190,240,.18);border-color:rgba(140,210,255,.45)}
   #pmenu .pi small{display:block;opacity:.55;font-size:10px;margin-top:3px}
-  #ah{position:absolute;left:50%;top:12px;bottom:auto;transform:translateX(-50%);width:124px;height:124px;
+  #ah{position:absolute;left:50%;top:var(--st);bottom:auto;transform:translateX(-50%);width:124px;height:124px;
     pointer-events:none;opacity:.92;filter:drop-shadow(0 2px 8px rgba(0,0,0,.45))}
-  #map{position:absolute;left:14px;top:198px;right:auto;bottom:auto;width:112px;height:112px;pointer-events:none;opacity:.9;
+  #map{position:absolute;left:14px;top:calc(var(--st) + 184px);right:auto;bottom:auto;width:112px;height:112px;pointer-events:none;opacity:.9;
     border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,.4)}
   #msg{position:absolute;inset:0;display:none;place-items:center;text-align:center;color:#e8f2fb;
     background:rgba(120,10,10,.35);font-size:18px;letter-spacing:.05em;backdrop-filter:blur(2px)}
   #msg.on{display:grid}
   #msg span{opacity:.7;font-size:13px;display:block;margin-top:8px}
-  #race{position:absolute;left:50%;top:144px;transform:translateX(-50%);display:none;align-items:center;gap:12px;
+  #race{position:absolute;left:50%;top:calc(var(--st) + 132px);transform:translateX(-50%);display:none;align-items:center;gap:12px;
     padding:8px 14px;border-radius:12px;background:rgba(8,14,20,.6);backdrop-filter:blur(6px);color:#e8f4ff;
     font-size:13px;pointer-events:none;border:1px solid rgba(255,214,90,.35);white-space:nowrap}
   #race.on{display:flex}
@@ -1578,7 +1579,7 @@ function layout() {
   const W = innerWidth, H = innerHeight;
   return {
     W, H,
-    thr: { x0: W - 132, y0: Math.max(150, H * 0.26), x1: W - 14, y1: H - 200 },
+    thr: { x0: W - 132, y0: Math.max(176, H * 0.26), x1: W - 14, y1: H - 200 },
     rudL: { x0: W - 306, y0: H - 148, x1: W - 196, y1: H - 46 },
     rudR: { x0: W - 186, y0: H - 148, x1: W - 76, y1: H - 46 }
   };
