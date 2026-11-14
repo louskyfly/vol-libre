@@ -24,7 +24,7 @@
   #hud .k{opacity:.55;letter-spacing:.06em;font-size:11px;padding-top:2px}
   #hud .v{font-variant-numeric:tabular-nums;font-weight:600}
   #hud .v small{opacity:.5;font-weight:400;font-size:10px}
-  #btns{position:absolute;right:12px;top:12px;display:flex;gap:8px}
+  #btns{position:absolute;right:12px;top:12px;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;max-width:calc(50vw - 84px)}
   #btns button{font:inherit;font-size:11px;letter-spacing:.05em;color:#cfe0ef;background:rgba(8,14,20,.55);
     border:1px solid rgba(255,255,255,.16);border-radius:8px;padding:8px 10px;touch-action:none}
   #btns button:active{background:rgba(255,255,255,.12)}
@@ -52,11 +52,51 @@
     background:rgba(120,10,10,.35);font-size:18px;letter-spacing:.05em;backdrop-filter:blur(2px)}
   #msg.on{display:grid}
   #msg span{opacity:.7;font-size:13px;display:block;margin-top:8px}
+  #race{position:absolute;left:50%;top:144px;transform:translateX(-50%);display:none;align-items:center;gap:12px;
+    padding:8px 14px;border-radius:12px;background:rgba(8,14,20,.6);backdrop-filter:blur(6px);color:#e8f4ff;
+    font-size:13px;pointer-events:none;border:1px solid rgba(255,214,90,.35);white-space:nowrap}
+  #race.on{display:flex}
+  #race .t{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;color:#ffd65a}
+  #race .s{opacity:.7;font-size:11px;letter-spacing:.05em}
+  #race svg{width:30px;height:30px;transition:transform .08s linear}
+  #cmenu{position:absolute;inset:0;display:none;align-items:flex-start;justify-content:center;padding-top:56px;background:rgba(6,10,14,.45);backdrop-filter:blur(3px);pointer-events:auto}
+  #cmenu.on{display:flex}
+  #cmenu .card,#rmenu .card{background:rgba(10,16,22,.94);border:1px solid rgba(170,210,240,.18);border-radius:14px;padding:12px 14px;max-width:min(520px,92vw);max-height:76vh;overflow:auto;color:#dbe9f5}
+  #cmenu .title,#rmenu .title{font-size:12px;letter-spacing:.12em;opacity:.6;margin:8px 2px 8px}
+  #cmenu .sw{display:flex;flex-wrap:wrap;gap:8px}
+  #cmenu .sw button{width:38px;height:38px;border-radius:50%;border:2px solid rgba(255,255,255,.25)}
+  #cmenu .sw button.sel{border-color:#fff;box-shadow:0 0 0 3px rgba(120,200,255,.6)}
+  #cmenu .num{display:flex;align-items:center;gap:12px;font-size:26px;font-weight:700}
+  #cmenu .num button,#cmenu .row button,#rmenu .pi{font:inherit;font-size:14px;color:#dfeefb;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:8px 14px}
+  #cmenu .row{display:flex;gap:8px;margin-top:14px;justify-content:flex-end}
+  #pmenu,#cmenu,#rmenu{z-index:20}
+  #rmenu{position:absolute;inset:0;display:none;align-items:flex-start;justify-content:center;padding-top:56px;background:rgba(6,10,14,.45);backdrop-filter:blur(3px);pointer-events:auto}
+  #rmenu.on{display:flex}
+  #rmenu .grid{display:grid;gap:8px}
+  #rmenu .pi{text-align:left;padding:10px 12px}
+  #rmenu .pi small{display:block;opacity:.6;font-size:11px;margin-top:3px}
 </style>
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="apple-mobile-web-app-title" content="Vol libre">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0b1016">
 </head>
 <body>
 <canvas id="c"></canvas>
 <canvas id="ctl"></canvas>
+<div id="race"><svg viewBox="0 0 30 30" id="rarrow"><path d="M15 3 L25 25 L15 19 L5 25 Z" fill="#ffd65a" stroke="rgba(0,0,0,.5)"/></svg>
+  <div><div class="t" id="rtime">0:00.0</div><div class="s" id="rinfo">ANNEAU 1/10</div></div>
+  <div class="s" id="rbest" style="text-align:right">RECORD<br>—</div></div>
+<div id="cmenu" aria-hidden="true"><div class="card">
+  <div class="title">FUSELAGE</div><div class="sw" id="swBody"></div>
+  <div class="title">BANDES ET DÉCORS</div><div class="sw" id="swAcc"></div>
+  <div class="title">NUMÉRO</div>
+  <div class="num"><button id="nMinus">−</button><span id="nVal">00</span><button id="nPlus">+</button><button id="nNone" style="font-size:12px">SANS</button></div>
+  <div class="row"><button id="cDefault">PAR DÉFAUT</button><button id="cOk">OK</button></div>
+</div></div>
+<div id="rmenu" aria-hidden="true"><div class="card"><div class="title">COURSES D'ANNEAUX</div><div class="grid" id="rgrid"></div></div></div>
 <div id="hud">
   <div class="r"><span class="k">VIT</span><span class="v" id="spd">0<small> kt</small></span></div>
   <div class="r"><span class="k">ALT</span><span class="v" id="alt">0<small> ft</small></span></div>
@@ -73,6 +113,8 @@
   <button id="bnuit">NUIT</button>
   <button id="bson">SON</button>
   <button id="bpiste">PISTE</button>
+  <button id="bcourse">COURSE</button>
+  <button id="bpaint">PEINTURE</button>
   <button id="breset">RESET</button>
 </div>
 <div id="toast"></div>
@@ -135,12 +177,16 @@ const AIRPORTS = [
   { name: 'Aéroport principal', x: 0, z: 560, hdg: 0 },
   { name: 'Aérodrome Nord-Ouest', x: -12500, z: -9950, hdg: 0 }
 ];
+// porte-avions au large (pont dur à DECK_Y, brins d'arrêt à l'arrière, catapulte à l'avant)
+const CARRIER = { x: 0, z: 21000, w: 40, l: 320, deckY: 20, wires: [116, 126, 136, 146] };
+const onCarrier = (x, z) => Math.abs(x - CARRIER.x) < CARRIER.w / 2 && Math.abs(z - CARRIER.z) < CARRIER.l / 2;
+AIRPORTS.push({ name: 'Porte-avions', x: CARRIER.x, z: CARRIER.z + 128, y: CARRIER.deckY, carrier: true });
 var airportIdx = 0;
 const HARD = [...RUNWAYS, ...TAXIWAYS];
 
 function inRectXZ(x, z, r) { return Math.abs(x - (r.x||0)) < r.w/2 && Math.abs(z - (r.z||0)) < r.l/2; }
 function onHardSurface(x, z) { return HARD.some(r => inRectXZ(x, z, r)); }
-const onRunway = onHardSurface; // compat
+const onRunway = (x, z) => onHardSurface(x, z) || onCarrier(x, z); // compat (+ pont du porte-avions)
 
 // îlots au large, pour un horizon moins vide
 const ISLETS = [
@@ -235,6 +281,7 @@ function terrainHeight(x, z) {
 }
 
 function groundAt(x, z) {
+  if (onCarrier(x, z)) return CARRIER.deckY;
   return onHardSurface(x, z) ? RW_Y : terrainHeight(x, z);
 }
 
@@ -776,6 +823,39 @@ function makeGlow(positions, color, size, opacity, name) {
   makeGlow(approach, 0xfff3cf, 4.2, 0.8, 'appr');
 }
 
+// --- porte-avions
+{
+  const C = CARRIER, g = new THREE.Group();
+  const hullMat = new THREE.MeshStandardMaterial({ color: 0x5d646c, roughness: 0.75, metalness: 0.25 });
+  const deckMat = new THREE.MeshStandardMaterial({ color: 0x3a3e43, roughness: 0.9, metalness: 0.05 });
+  const hull = new THREE.Mesh(new THREE.BoxGeometry(C.w + 12, C.deckY + 8, C.l - 20), hullMat);
+  hull.position.set(4, (C.deckY - 8) / 2 - 0.6, 0); g.add(hull);
+  const bow = new THREE.Mesh(new THREE.CylinderGeometry(0.01, (C.w + 12) / 2, 50, 3, 1), hullMat);
+  bow.rotation.set(Math.PI / 2, 0, 0); bow.scale.set(1, 1, 0.55); bow.position.set(4, C.deckY / 2 - 4.6, -C.l / 2 - 5); g.add(bow);
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(C.w + 12, 1, C.l), deckMat);
+  deck.position.set(4, C.deckY - 0.5, 0); g.add(deck);
+  // îlot (superstructure) à tribord, hors de la zone de pont
+  const isl = new THREE.Mesh(new THREE.BoxGeometry(8, 16, 34), hullMat); isl.position.set(C.w / 2 + 5, C.deckY + 8, 10); g.add(isl);
+  const isl2 = new THREE.Mesh(new THREE.BoxGeometry(6, 8, 14), hullMat); isl2.position.set(C.w / 2 + 5, C.deckY + 20, 6); g.add(isl2);
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.6, 14, 6), hullMat); mast.position.set(C.w / 2 + 5, C.deckY + 31, 6); g.add(mast);
+  const L = (w, l, x, z, col = 0xf0f2ec) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, l).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: col })); m.position.set(x, C.deckY + 0.03, z); g.add(m); };
+  for (let i = -7; i <= 7; i++) if (i % 2 === 0) L(0.6, 12, 0, i * 20);                 // axe
+  L(0.5, C.l - 10, -C.w / 2 + 1.5, 0); L(0.5, C.l - 10, C.w / 2 - 1.5, 0);           // bords
+  L(C.w - 6, 1.2, 0, C.l / 2 - 8, 0xf2d34a);                                          // seuil
+  L(1.2, 70, -6, -C.l / 2 + 45, 0xf2d34a); L(1.2, 70, 6, -C.l / 2 + 45, 0xf2d34a);    // catapulte
+  const wireMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.6, metalness: 0.6 });
+  for (const wz of C.wires) { const w = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, C.w - 8, 6), wireMat); w.rotation.z = Math.PI / 2; w.position.set(0, C.deckY + 0.12, wz); g.add(w); }
+  g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  g.position.set(C.x, 0, C.z);
+  scene.add(g);
+  const edge = [];
+  for (let d = -C.l / 2 + 6; d <= C.l / 2 - 6; d += 20) for (const sx of [-1, 1]) edge.push(C.x + sx * (C.w / 2 - 0.5), C.deckY + 0.4, C.z + d);
+  makeGlow(edge, 0xffe9b0, 4.2, 0.95, 'carrier');
+  const ctr = [];
+  for (let d = -C.l / 2 + 10; d <= C.l / 2 - 10; d += 16) ctr.push(C.x, C.deckY + 0.3, C.z + d);
+  makeGlow(ctr, 0xf4f6f0, 2.6, 0.7, 'carrierC');
+}
+
 /* ------------------------------------------------------------------ */
 /*  flotte : appareils aux comportements distincts                     */
 /* ------------------------------------------------------------------ */
@@ -960,8 +1040,25 @@ function makeFin(h, chord, taper, mat) {
   return new THREE.Mesh(g, mat);
 }
 
+// personnalisation (sauvegardée par avion)
+const PAINT_KEY = 'vollibre.paint.v1';
+let paints = {};
+try { paints = JSON.parse(localStorage.getItem(PAINT_KEY) || '{}') || {}; } catch (e) { paints = {}; }
+const savePaints = () => { try { localStorage.setItem(PAINT_KEY, JSON.stringify(paints)); } catch (e) {} };
+function numberTexture(num, fg, bg) {
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 128;
+  const c = cv.getContext('2d');
+  c.clearRect(0, 0, 256, 128);
+  c.font = 'bold 104px Helvetica, Arial, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.lineWidth = 10; c.strokeStyle = bg; c.strokeText(num, 128, 68);
+  c.fillStyle = fg; c.fillText(num, 128, 68);
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  return t;
+}
 function buildPlane(P) {
-  const L = P.look, g = new THREE.Group();
+  const L0 = P.look, g = new THREE.Group();
+  const cust = paints[P.name] || {};
+  const L = Object.assign({}, L0, cust.body != null ? { body: cust.body } : {}, cust.accent != null ? { accent: cust.accent } : {});
   const matBody  = new THREE.MeshStandardMaterial({ color: L.body, roughness: 0.38, metalness: 0.22 });
   const matAcc   = new THREE.MeshStandardMaterial({ color: L.accent, roughness: 0.32, metalness: 0.35 });
   const matDark  = new THREE.MeshStandardMaterial({ color: L.trim, roughness: 0.55, metalness: 0.15 });
@@ -1152,7 +1249,22 @@ function buildPlane(P) {
     g.userData.beam = beam;
   }
 
-  g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  // numéro peint sur les flancs, à l'arrière du fuselage
+  if (cust.num != null && cust.num !== '') {
+    const fg = '#' + new THREE.Color(L.accent).getHexString();
+    const dark = new THREE.Color(L.body).getHSL({h:0,s:0,l:0}).l > 0.55;
+    const tex = numberTexture(String(cust.num), dark ? fg : '#ffffff', dark ? 'rgba(20,20,20,.55)' : 'rgba(0,0,0,.35)');
+    const dm = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+    const hgt = L.rmax * 0.7, zc = L.len * 0.2;
+    for (const sx of [-1, 1]) {
+      const d = new THREE.Mesh(new THREE.PlaneGeometry(hgt * 2, hgt), dm);
+      d.position.set(sx * (L.rmax * 0.84 + 0.03), L.rmax * 0.05, zc);
+      d.rotation.y = sx * Math.PI / 2;
+      d.renderOrder = 2;
+      g.add(d);
+    }
+  }
+  g.traverse(o => { if (o.isMesh) { o.castShadow = !o.material.map || o.material.isMeshStandardMaterial; o.receiveShadow = true; } });
   return g;
 }
 
@@ -1220,6 +1332,7 @@ const ctrl   = { elev: 0, ail: 0, rud: 0, thr: 0 };
 const target = { elev: 0, ail: 0, rud: 0, thr: 0 };
 
 let onGround = true, crashed = false, stallLevel = 0, aoaLive = 0;
+const hook = { armed: false, caught: false }, cat = { armed: false, fired: false };
 let lastGh = 0, simT = 0, throttle = 0;
 let gearDown = true, gearAnim = 1; // 1 = sorti, 0 = rentré
 const gearExtendable = () => !!PLANES[planeIdx].look.retractable;
@@ -1232,7 +1345,7 @@ const _Iw = new THREE.Vector3(), _cr = new THREE.Vector3(), _fwd = new THREE.Vec
 function reset() {
   const h = gearEffectiveH();
   const ap0 = AIRPORTS[airportIdx];
-  pos.set(ap0.x, RW_Y + GEAR_H, ap0.z);
+  pos.set(ap0.x, (ap0.y ?? RW_Y) + GEAR_H, ap0.z);
   vel.set(0, 0, 0);
   quat.identity();
   omega.set(0, 0, 0);
@@ -1242,7 +1355,9 @@ function reset() {
   crashed = false;
   gearDown = true; gearAnim = 1;
   AC.Cm0 = PLANES[planeIdx].perf.Cm0;
-  pos.y = RW_Y + h;
+  pos.y = (ap0.y ?? RW_Y) + h;
+  hook.caught = false; hook.armed = false; cat.armed = !!ap0.carrier; cat.fired = false;
+  if (typeof raceAbort === 'function') raceAbort();
   lastGh = groundAt(pos.x, pos.z);
   if (typeof resetContrails === 'function') resetContrails();
   if (typeof resetGroundFx === 'function') resetGroundFx();
@@ -1387,8 +1502,26 @@ function step(dt) {
     vel.y = 0;
     onGround = true;
     if (wasAir && typeof spawnGroundBurst === 'function') spawnGroundBurst(speedH, impact);
+    // --- porte-avions : brins d'arrêt + catapulte
+    if (onCarrier(pos.x, pos.z)) {
+      const dz = pos.z - CARRIER.z;
+      if (wasAir) { hook.armed = true; cat.armed = false; }
+      if (hook.armed && !hook.caught && speedH > 6 && dz > CARRIER.wires[0] - 4 && dz < CARRIER.wires[3] + 4) {
+        hook.caught = true; cat.armed = false; toast('Brin accroché !');
+      }
+      if (hook.caught) {
+        const sp0 = Math.hypot(vel.x, vel.z);
+        if (sp0 > 0.5) { const f = Math.max(0, sp0 - 32 * dt) / sp0; vel.x *= f; vel.z *= f; }
+        else { hook.armed = false; hook.caught = false; toast('Appontage réussi !'); }
+      }
+      if (cat.armed && ctrl.thr > 0.85 && dz < CARRIER.l / 2 - 20 && speedH < Math.max(AC.Vmax * 0.55, 32)) {
+        if (!cat.fired) { cat.fired = true; toast('Catapulte !'); }
+        const f2 = _fwd.set(0, 0, -1).applyQuaternion(quat);
+        vel.x += f2.x * 34 * dt; vel.z += f2.z * 34 * dt;
+      }
+    }
     const sp = Math.hypot(vel.x, vel.z);
-    const decel = (ctrl.thr > 0.05 ? 0.18 : 1.1) * dt;
+    const decel = (hook.caught ? 0 : (ctrl.thr > 0.05 ? 0.18 : 1.1)) * dt;
     if (sp > 1e-4) { const f = Math.max(0, sp - decel) / sp; vel.x *= f; vel.z *= f; }
     omega.x *= Math.exp(-dt * 2.5);
     omega.z *= Math.exp(-dt * 7);
@@ -1711,6 +1844,14 @@ function drawMap() {
   // pistes
   c.fillStyle = '#e8e8e0';
   for (const r of RUNWAYS) c.fillRect(S / 2 + (r.x - r.w / 2 - pos.x) * kk - 0.5, S / 2 + (r.z - r.l / 2 - pos.z) * kk - 0.5, Math.max(2, r.w * kk), Math.max(2, r.l * kk));
+  c.fillRect(S / 2 + (CARRIER.x - CARRIER.w / 2 - pos.x) * kk - 1, S / 2 + (CARRIER.z - CARRIER.l / 2 - pos.z) * kk - 1, 3, Math.max(3, CARRIER.l * kk));
+  if (race.idx >= 0 && !race.done) {
+    race.rings.forEach((rg, k) => {
+      if (k < race.next) return;
+      c.fillStyle = k === race.next ? '#ffd23a' : 'rgba(255,255,255,.6)';
+      c.beginPath(); c.arc(S / 2 + (rg.c.x - pos.x) * kk, S / 2 + (rg.c.z - pos.z) * kk, k === race.next ? 4 : 2.2, 0, 6.2832); c.fill();
+    });
+  }
   const px = S / 2, py = S / 2;
   c.save();
   c.translate(px, py);
@@ -1921,6 +2062,7 @@ function frame(now) {
   rQuat.slerpQuaternions(prevQuat, quat, alphaI);
   aircraft.position.copy(rPos);
   aircraft.quaternion.copy(rQuat);
+  if (typeof updateRace === 'function') updateRace(crashed ? 0 : Math.min(dtReal, 0.1));
 
   updateCamera(dtReal);
   sky.position.copy(camera.position);
@@ -1974,7 +2116,200 @@ applyDayNight();
 requestAnimationFrame(frame);
 setTimeout(buildMap, 400);
 
+/* ------------------------------------------------------------------ */
+/*  courses d'anneaux chronométrées                                    */
+/* ------------------------------------------------------------------ */
+const RACES = [
+  { name: "Tour de l'aéroport", tag: 'facile · 8 anneaux', agl: 110, r: 30,
+    pts: [[0,-1600],[1500,-2600],[3000,-1200],[2600,1200],[900,2600],[-1400,2400],[-2800,600],[-1800,-1400]] },
+  { name: 'Vallée des glaciers', tag: 'au pied des sommets · 11 anneaux', agl: 150, r: 32,
+    pts: [[1990,-2960],[3850,-4970],[5770,-6930],[7890,-8290],[10050,-9630],[12080,-8900],[14160,-8150],[14990,-6000],[15880,-3860],[15560,-1280],[15309,1276]] },
+  { name: 'Raid des îles', tag: 'au ras des vagues · 9 anneaux', agl: 40, r: 30,
+    pts: [[-2000,-1800],[-4800,-3600],[-7600,-5600],[-9600,-7600],[-11400,-9000],[-15500,-6500],[-15500,-1500],[-14200,3600],[-11000,6000]] },
+  { name: 'Cap sur le porte-avions', tag: 'large · 8 anneaux, puis appontage', agl: 60, r: 32,
+    pts: [[0,1600],[1200,5200],[-1500,9500],[600,13800],[2000,17500],[2600,22800],[0,24400],[0,22700]] }
+];
+const RECORD_KEY = 'vollibre.records.v1';
+let records = {};
+try { records = JSON.parse(localStorage.getItem(RECORD_KEY) || '{}') || {}; } catch (e) { records = {}; }
+const fmtT = t => { const m = Math.floor(t / 60), s = t - m * 60; return m + ':' + (s < 10 ? '0' : '') + s.toFixed(1); };
+
+// placement des anneaux : au-dessus du relief, en gardant le passage dégagé entre deux anneaux
+function buildRaceRings(R) {
+  const P = R.pts.map(([x, z]) => ({ x, z, y: Math.max(terrainHeight(x, z), 0) + R.agl }));
+  for (let pass = 0; pass < 3; pass++) {
+    for (let i = 0; i < P.length - 1; i++) {
+      const a = P[i], b = P[i + 1];
+      let need = 0;
+      for (let k = 1; k < 24; k++) {
+        const t = k / 24, x = lerp(a.x, b.x, t), z = lerp(a.z, b.z, t);
+        need = Math.max(need, Math.max(terrainHeight(x, z), 0) + R.agl * 0.6 - lerp(a.y, b.y, t));
+      }
+      if (need > 0) { a.y += need; b.y += need; }
+    }
+  }
+  return P.map((p, i) => {
+    const q = P[Math.min(i + 1, P.length - 1)], o = P[Math.max(i - 1, 0)];
+    const n = new THREE.Vector3(q.x - o.x, (q.y - o.y) * 0.5, q.z - o.z);
+    if (i === 0) n.set(q.x - p.x, 0, q.z - p.z);
+    if (i === P.length - 1) n.set(p.x - o.x, 0, p.z - o.z);
+    n.normalize();
+    return { c: new THREE.Vector3(p.x, p.y, p.z), n };
+  });
+}
+var race = { idx: -1, rings: [], next: 0, t: 0, running: false, group: new THREE.Group(), last: new THREE.Vector3(), done: false };
+scene.add(race.group);
+const ringMatNext = new THREE.MeshBasicMaterial({ color: 0xffd23a, transparent: true, opacity: 0.95 });
+const ringMatLater = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35 });
+const ringMatGo = new THREE.MeshBasicMaterial({ color: 0x48ff7a, transparent: true, opacity: 0.95 });
+const raceEl = el('race'), rTime = el('rtime'), rInfo = el('rinfo'), rBest = el('rbest'), rArrow = el('rarrow');
+
+function raceAbort() {
+  if (!race || race.idx < 0) return;
+  race.idx = -1; race.running = false; race.group.clear(); raceEl.classList.remove('on');
+}
+function raceStart(i) {
+  const R = RACES[i];
+  reset();                                  // repart proprement (annule l'éventuelle course)
+  race.idx = i; race.rings = buildRaceRings(R); race.next = 0; race.t = 0; race.running = false; race.done = false;
+  race.group.clear();
+  race.rings.forEach((rg, k) => {
+    const m = new THREE.Mesh(new THREE.TorusGeometry(R.r, 1.8, 10, 48), k === 0 ? ringMatGo : ringMatLater);
+    m.position.copy(rg.c);
+    m.lookAt(rg.c.clone().add(rg.n));
+    rg.mesh = m; race.group.add(m);
+  });
+  // départ en vol, 700 m avant le premier anneau, aligné sur lui
+  const r0 = race.rings[0];
+  const d = new THREE.Vector3(r0.n.x, 0, r0.n.z).normalize();
+  pos.copy(r0.c).addScaledVector(d, -700);
+  pos.y = Math.max(pos.y, Math.max(terrainHeight(pos.x, pos.z), 0) + 80);
+  const v0 = clamp(AC.Vmax * 0.6, 28, 120);
+  vel.copy(d).multiplyScalar(v0);
+  quat.setFromEuler(new THREE.Euler(0, Math.atan2(-d.x, -d.z), 0));
+  omega.set(0, 0, 0);
+  onGround = false; hook.armed = false; cat.armed = false;
+  if (gearExtendable()) { gearDown = false; gearAnim = 0; }
+  throttle = target.thr = ctrl.thr = AC.Tmax > 0 ? 0.75 : 0;
+  lastGh = groundAt(pos.x, pos.z);
+  prevPos.copy(pos); prevQuat.copy(quat); camInit = false;
+  race.last.copy(pos);
+  raceEl.classList.add('on');
+  hintEl.classList.add('off');
+  updateRaceHUD();
+  toast(R.name);
+}
+function updateRaceHUD() {
+  const R = RACES[race.idx];
+  rTime.textContent = fmtT(race.t);
+  rInfo.textContent = race.done ? 'ARRIVÉE' : ('ANNEAU ' + Math.min(race.next + 1, race.rings.length) + '/' + race.rings.length);
+  const best = records[R.name];
+  rBest.innerHTML = 'RECORD<br>' + (best ? fmtT(best) : '—');
+}
+const _rv = new THREE.Vector3(), _rp = new THREE.Vector3();
+function updateRace(dt) {
+  if (race.idx < 0) return;
+  if (crashed) { race.running = false; return; }
+  if (race.running && !race.done) race.t += dt;
+  if (!race.done) {
+    const rg = race.rings[race.next];
+    const s0 = _rv.copy(race.last).sub(rg.c).dot(rg.n), s1 = _rp.copy(pos).sub(rg.c).dot(rg.n);
+    if (s0 < 0 && s1 >= 0) {
+      const t = s0 / (s0 - s1);
+      _rv.copy(race.last).lerp(pos, t);
+      if (_rv.distanceTo(rg.c) < RACES[race.idx].r) {
+        rg.mesh.visible = false;
+        if (race.next === 0) { race.running = true; race.t = 0; }
+        race.next++;
+        if (race.next >= race.rings.length) {
+          race.done = true; race.running = false;
+          const R = RACES[race.idx], best = records[R.name];
+          if (!best || race.t < best) { records[R.name] = race.t; try { localStorage.setItem(RECORD_KEY, JSON.stringify(records)); } catch (e) {} toast('Nouveau record ! ' + fmtT(race.t)); }
+          else toast('Arrivée : ' + fmtT(race.t));
+        } else {
+          race.rings[race.next].mesh.material = ringMatNext;
+          if (audio && audio.ctx) { try { const o = audio.ctx.createOscillator(), g2 = audio.ctx.createGain(); o.frequency.value = 880; g2.gain.value = 0.08; o.connect(g2).connect(audio.ctx.destination); o.start(); o.stop(audio.ctx.currentTime + 0.12); } catch (e) {} }
+        }
+      }
+    }
+  }
+  race.last.copy(pos);
+  // flèche vers le prochain anneau
+  if (!race.done) {
+    const rg = race.rings[race.next];
+    const dx = rg.c.x - pos.x, dz = rg.c.z - pos.z;
+    const brg = Math.atan2(dx, -dz);
+    _fwd.set(0, 0, -1).applyQuaternion(quat);
+    const hdg = Math.atan2(_fwd.x, -_fwd.z);
+    let rel = brg - hdg; rel = Math.atan2(Math.sin(rel), Math.cos(rel));
+    rArrow.style.transform = 'rotate(' + (rel * 57.2958).toFixed(1) + 'deg)';
+  }
+  updateRaceHUD();
+}
+function buildRaceMenu() {
+  const g = el('rgrid'); g.innerHTML = '';
+  RACES.forEach((R, i) => {
+    const b = document.createElement('button'); b.className = 'pi';
+    const best = records[R.name];
+    b.innerHTML = R.name + '<small>' + R.tag + (best ? ' · record ' + fmtT(best) : '') + '</small>';
+    b.addEventListener('click', e => { e.stopPropagation(); initAudio(); closeMenu('rmenu'); raceStart(i); });
+    g.appendChild(b);
+  });
+  if (race.idx >= 0) {
+    const b = document.createElement('button'); b.className = 'pi'; b.innerHTML = 'Arrêter la course';
+    b.addEventListener('click', e => { e.stopPropagation(); closeMenu('rmenu'); raceAbort(); });
+    g.appendChild(b);
+  }
+}
+function openMenu(id) { const m = el(id); m.classList.add('on'); m.setAttribute('aria-hidden', 'false'); }
+function closeMenu(id) { const m = el(id); m.classList.remove('on'); m.setAttribute('aria-hidden', 'true'); }
+el('bcourse').addEventListener('click', e => { e.stopPropagation(); buildRaceMenu(); openMenu('rmenu'); });
+el('rmenu').addEventListener('click', e => { if (e.target.id === 'rmenu') closeMenu('rmenu'); });
+
+/* ------------------------------------------------------------------ */
+/*  peinture : couleurs + numéro                                       */
+/* ------------------------------------------------------------------ */
+const BODY_COLS = [0xf2f5f8, 0xfaf7f2, 0x1d2228, 0x6b7682, 0xc0372c, 0x2f6fb8, 0x1e6b4f, 0xf0c040, 0xff7a1a, 0x7b4fd6];
+const ACC_COLS  = [0xc0372c, 0xd23b2a, 0x2f6fb8, 0x3aa0ff, 0x2da84a, 0xf0c040, 0xff7a1a, 0xffffff, 0x1d2126, 0xe0409a];
+function rebuildAircraft() {
+  const P = PLANES[planeIdx];
+  const wasVisible = aircraft.visible;
+  scene.remove(aircraft);
+  aircraft = buildPlane(P);
+  aircraft.visible = wasVisible;
+  aircraft.position.copy(rPos); aircraft.quaternion.copy(rQuat);
+  scene.add(aircraft);
+  updatePlaneNight();
+}
+function paintOf() { const n = PLANES[planeIdx].name; return paints[n] || (paints[n] = {}); }
+function buildPaintMenu() {
+  const P = PLANES[planeIdx], c = paintOf();
+  const mk = (box, cols, key, def) => {
+    box.innerHTML = '';
+    const cur = c[key] != null ? c[key] : def;
+    cols.forEach(col => {
+      const b = document.createElement('button');
+      b.style.background = '#' + col.toString(16).padStart(6, '0');
+      if (col === cur) b.classList.add('sel');
+      b.addEventListener('click', e => { e.stopPropagation(); c[key] = col; savePaints(); rebuildAircraft(); buildPaintMenu(); });
+      box.appendChild(b);
+    });
+  };
+  mk(el('swBody'), BODY_COLS, 'body', P.look.body);
+  mk(el('swAcc'), ACC_COLS, 'accent', P.look.accent);
+  el('nVal').textContent = (c.num == null || c.num === '') ? '—' : String(c.num).padStart(2, '0');
+}
+function setNum(v) { const c = paintOf(); c.num = v; savePaints(); rebuildAircraft(); buildPaintMenu(); }
+el('nPlus').addEventListener('click', e => { e.stopPropagation(); const c = paintOf(); setNum(((c.num == null || c.num === '' ? 0 : +c.num) + 1) % 100); });
+el('nMinus').addEventListener('click', e => { e.stopPropagation(); const c = paintOf(); setNum(((c.num == null || c.num === '' ? 0 : +c.num) + 99) % 100); });
+el('nNone').addEventListener('click', e => { e.stopPropagation(); setNum(''); });
+el('cDefault').addEventListener('click', e => { e.stopPropagation(); delete paints[PLANES[planeIdx].name]; savePaints(); rebuildAircraft(); buildPaintMenu(); });
+el('cOk').addEventListener('click', e => { e.stopPropagation(); closeMenu('cmenu'); });
+el('bpaint').addEventListener('click', e => { e.stopPropagation(); buildPaintMenu(); openMenu('cmenu'); });
+el('cmenu').addEventListener('click', e => { if (e.target.id === 'cmenu') closeMenu('cmenu'); });
+
 /* sonde de diagnostic (utilisée par les tests, sans effet sur le jeu) */
+window.__race = () => ({ idx: race.idx, next: race.next, t: race.t, n: race.rings.length, done: race.done, pos: pos.toArray().map(v => Math.round(v)), ring: race.rings[race.next] ? race.rings[race.next].c.toArray().map(v => Math.round(v)) : null });
 window.__setState = (s) => {
   if (s.plane != null) setPlane(s.plane);
   if (s.pos) pos.set(s.pos[0], s.pos[1], s.pos[2]);

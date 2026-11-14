@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b2a5b"/>
+      <stop offset="0.45" stop-color="#2f6fb8"/>
+      <stop offset="0.72" stop-color="#f4a25a"/>
+      <stop offset="0.80" stop-color="#ffd38a"/>
+    </linearGradient>
+    <linearGradient id="sea" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a5a86"/>
+      <stop offset="1" stop-color="#0c2440"/>
+    </linearGradient>
+    <radialGradient id="sun" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#fffbe8"/>
+      <stop offset="0.35" stop-color="#ffe7a6"/>
+      <stop offset="1" stop-color="#ffb35a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="trail" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.85"/>
+    </linearGradient>
+    <linearGradient id="jet" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f4f7fb"/>
+      <stop offset="1" stop-color="#b9c6d4"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#sky)"/>
+  <circle cx="300" cy="560" r="260" fill="url(#sun)"/>
+  <circle cx="300" cy="560" r="62" fill="#fff6dc"/>
+  <!-- montagnes lointaines -->
+  <path d="M0 760 L120 650 L210 700 L330 590 L430 680 L540 560 L650 670 L760 600 L880 690 L1024 610 L1024 820 L0 820 Z" fill="#6f7fa6" opacity="0.75"/>
+  <!-- montagnes proches + neige -->
+  <path d="M0 820 L170 640 L260 720 L420 520 L560 700 L660 610 L790 730 L900 600 L1024 700 L1024 860 L0 860 Z" fill="#3c4a6b"/>
+  <path d="M370 582 L420 520 L470 585 L445 575 L425 600 L400 572 Z" fill="#f3f6fb"/>
+  <path d="M135 678 L170 640 L205 677 L185 670 L170 690 L152 668 Z" fill="#f3f6fb"/>
+  <path d="M865 642 L900 600 L937 643 L915 636 L900 655 L885 634 Z" fill="#f3f6fb"/>
+  <path d="M630 638 L660 610 L690 640 L672 634 L660 650 L646 632 Z" fill="#f3f6fb"/>
+  <!-- mer -->
+  <rect y="850" width="1024" height="174" fill="url(#sea)"/>
+  <path d="M250 880 h160 M220 920 h220 M270 960 h120" stroke="#ffd38a" stroke-width="8" stroke-linecap="round" opacity="0.55"/>
+  <!-- anneau de course -->
+  <ellipse cx="585" cy="455" rx="120" ry="160" fill="none" stroke="#ffd23a" stroke-width="26" transform="rotate(-28 585 455)" opacity="0.95"/>
+  <!-- traînée -->
+  <path d="M60 800 Q 400 600 600 440" stroke="url(#trail)" stroke-width="30" fill="none" stroke-linecap="round"/>
+  <!-- avion de chasse, vu de dessus, en montée -->
+  <g transform="translate(660 370) rotate(52) scale(1.42)">
+    <path d="M0 -150 C 10 -120 14 -80 15 -40 L 120 40 L 120 62 L 18 34 L 16 90 L 56 122 L 56 138 L 8 128 L 0 140 L -8 128 L -56 138 L -56 122 L -16 90 L -18 34 L -120 62 L -120 40 L -15 -40 C -14 -80 -10 -120 0 -150 Z"
+      fill="url(#jet)" stroke="#2a3340" stroke-width="5" stroke-linejoin="round"/>
+    <path d="M0 -112 C 7 -95 8 -70 7 -52 L -7 -52 C -8 -70 -7 -95 0 -112 Z" fill="#1d6fb8"/>
+    <path d="M 70 18 L 120 40 L 120 62 L 70 48 Z M -70 18 L -120 40 L -120 62 L -70 48 Z" fill="#c0372c"/>
+  </g>
+</svg>
