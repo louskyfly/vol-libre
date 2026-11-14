@@ -137,7 +137,7 @@
 <canvas id="ah" width="150" height="150"></canvas>
 <canvas id="map" width="150" height="150"></canvas>
 <div id="stall">DÉCROCHAGE</div>
-<div id="hint">Glisse la manette GAZ vers le haut, puis tire le manche vers toi</div>
+<div id="hint">Pousse le joystick gauche vers le haut (gaz), puis tire le joystick droit vers toi</div>
 <div id="msg">CRASH<span>touche l'écran pour repartir</span></div>
 <script type="module">
 import * as THREE from './three.module.js';
@@ -2041,18 +2041,17 @@ const thrTouch = { on: false, id: null };
 const rudTouch = { on: false, id: null, dir: 0 };
 const keys = new Set();
 
-function stickBase() {
-  return { x: Math.max(155, Math.min(210, innerWidth * 0.18)), y: innerHeight - 165 };
-}
+// deux joysticks façon drone : à droite le manche (ressort), à gauche gaz (reste en place) + palonnier (ressort)
+const STICK_M = () => Math.max(150, Math.min(210, innerWidth * 0.18));
+function stickBase() { return { x: innerWidth - STICK_M(), y: innerHeight - 165 }; }
+function gasBase() { return { x: STICK_M(), y: innerHeight - 165 }; }
+const gas = { on: false, id: null, gx: 0, gy: 0, rud: 0 };
 
 function layout() {
   const W = innerWidth, H = innerHeight;
   return {
     W, H,
-    thr: { x0: W - 132, y0: Math.max(176, H * 0.26), x1: W - 14, y1: H - 200 },
-    rudL: { x0: W - 306, y0: H - 148, x1: W - 196, y1: H - 46 },
-    rudR: { x0: W - 186, y0: H - 148, x1: W - 76, y1: H - 46 },
-    fire: { x0: W - 300, y0: H - 268, x1: W - 196, y1: H - 164 }
+    fire: (() => { const b = stickBase(), cx = b.x - stick.R - 78, cy = b.y - stick.R - 10; return { x0: cx - 46, y0: cy - 46, x1: cx + 46, y1: cy + 46 }; })()
   };
 }
 const inRect = (x, y, r) => x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1;
@@ -2062,10 +2061,15 @@ canvas.addEventListener('pointerdown', e => {
   if (crashed) { reset(); return; }
   const L = layout(), x = e.clientX, y = e.clientY;
   if (combat.on && inRect(x, y, L.fire)) { combat.fire = true; combat.fireId = e.pointerId; }
-  else if (inRect(x, y, L.rudL)) { rudTouch.on = true; rudTouch.id = e.pointerId; rudTouch.dir = -1; }
-  else if (inRect(x, y, L.rudR)) { rudTouch.on = true; rudTouch.id = e.pointerId; rudTouch.dir = 1; }
-  else if (x > L.thr.x0 - 40 && y > L.thr.y0 - 50) { thrTouch.on = true; thrTouch.id = e.pointerId; setThrFromY(y, L); }
-  else if (x < L.W * 0.6) {
+  else if (x < L.W * 0.5) {
+    // joystick gauche : on garde le décalage pour éviter tout saut du gaz
+    const g = gasBase(), R = stick.R;
+    gas.on = true; gas.id = e.pointerId;
+    gas.gx = g.x - x;
+    gas.gy = (g.y + (1 - 2 * throttle) * R) - y;
+    document.getElementById('hint').classList.add('off');
+  }
+  else {
     // saisie du manche : on garde le décalage pour éviter tout saut
     const b = stickBase();
     stick.on = true; stick.id = e.pointerId;
@@ -2081,13 +2085,15 @@ canvas.addEventListener('pointermove', e => {
     const b = stickBase();
     stick.dx = clamp((x + stick.gx - b.x) / stick.R, -1, 1);
     stick.dy = clamp((y + stick.gy - b.y) / stick.R, -1, 1);
-  } else if (thrTouch.on && e.pointerId === thrTouch.id) {
-    setThrFromY(y, L);
+  } else if (gas.on && e.pointerId === gas.id) {
+    const g = gasBase(), R = stick.R;
+    throttle = clamp((g.y + R - (y + gas.gy)) / (2 * R), 0, 1);
+    gas.rud = clamp((x + gas.gx - g.x) / R, -1, 1);
   }
 });
 function endPointer(e) {
   if (e.pointerId === stick.id) { stick.on = false; stick.id = null; stick.dx = 0; stick.dy = 0; }
-  if (e.pointerId === thrTouch.id) { thrTouch.on = false; thrTouch.id = null; }
+  if (e.pointerId === gas.id) { gas.on = false; gas.id = null; gas.rud = 0; }
   if (e.pointerId === rudTouch.id) { rudTouch.on = false; rudTouch.id = null; rudTouch.dir = 0; }
   if (combat.on && e.pointerId === combat.fireId) { combat.fire = false; combat.fireId = null; }
 }
@@ -2100,6 +2106,7 @@ function releaseAll() {
   stick.on = false; stick.id = null; stick.dx = 0; stick.dy = 0;
   rudTouch.on = false; rudTouch.dir = 0; rudTouch.id = null;
   thrTouch.on = false; thrTouch.id = null;
+  gas.on = false; gas.id = null; gas.rud = 0;
   if (combat) { combat.fire = false; combat.fireId = null; }
 }
 addEventListener('blur', releaseAll);
@@ -2444,45 +2451,29 @@ function drawControls() {
   ctl2d.font = '10px ui-monospace,monospace';
   ctl2d.fillText('MANCHE', b.x, b.y + R + 38);
 
-  /* ---- manette des gaz ---- */
-  const tx = (L.thr.x0 + L.thr.x1) / 2, ty0 = L.thr.y0, ty1 = L.thr.y1;
-  ctl2d.fillStyle = 'rgba(8,15,22,.36)';
-  roundRect(L.thr.x0, ty0 - 34, L.thr.x1 - L.thr.x0, (ty1 - ty0) + 68, 18); ctl2d.fill();
-
-  ctl2d.fillStyle = 'rgba(255,255,255,.13)';
-  roundRect(tx - 8, ty0, 16, ty1 - ty0, 8); ctl2d.fill();
-
-  const ky2 = lerp(ty1, ty0, throttle);
-  ctl2d.fillStyle = 'rgba(111,208,255,.30)';
-  roundRect(tx - 8, ky2, 16, ty1 - ky2, 8); ctl2d.fill();
-
-  const gg = ctl2d.createLinearGradient(tx - 27, 0, tx + 27, 0);
-  gg.addColorStop(0, '#2f6f96'); gg.addColorStop(0.5, '#9bdcff'); gg.addColorStop(1, '#2f6f96');
-  roundRect(tx - 27, ky2 - 17, 54, 34, 10);
-  ctl2d.fillStyle = gg; ctl2d.fill();
-  ctl2d.strokeStyle = thrTouch.on ? '#ffffff' : 'rgba(255,255,255,.5)';
-  ctl2d.lineWidth = 2; ctl2d.stroke();
-
-  ctl2d.fillStyle = 'rgba(220,238,250,.85)';
-  ctl2d.font = 'bold 12px ui-monospace,monospace';
-  ctl2d.fillText(Math.round(throttle * 100) + '%', tx, ty0 - 18);
-  ctl2d.fillStyle = 'rgba(210,232,248,.45)';
-  ctl2d.font = '10px ui-monospace,monospace';
-  ctl2d.fillText('GAZ', tx, ty1 + 20);
-
-  /* ---- palonniers ---- */
-  for (const [r, lab, dir] of [[L.rudL, '<', -1], [L.rudR, '>', 1]]) {
-    const act = rudTouch.on && rudTouch.dir === dir;
-    const pg = ctl2d.createLinearGradient(0, r.y0, 0, r.y1);
-    pg.addColorStop(0, act ? 'rgba(140,220,255,.55)' : 'rgba(40,62,80,.62)');
-    pg.addColorStop(1, act ? 'rgba(90,170,215,.45)' : 'rgba(16,26,36,.62)');
-    roundRect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0, 16);
-    ctl2d.fillStyle = pg; ctl2d.fill();
-    ctl2d.strokeStyle = act ? '#8ed8ff' : 'rgba(160,195,225,.28)';
-    ctl2d.lineWidth = 2; ctl2d.stroke();
-    ctl2d.fillStyle = act ? '#ffffff' : 'rgba(215,235,250,.75)';
-    ctl2d.font = '24px ui-monospace,monospace';
-    ctl2d.fillText(lab, (r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2 + 1);
+  /* ---- joystick gauche : gaz (haut/bas, reste en place) + palonnier (gauche/droite) ---- */
+  {
+    const g = gasBase();
+    ctl2d.beginPath(); ctl2d.arc(g.x, g.y, R + 20, 0, 6.2832);
+    ctl2d.fillStyle = 'rgba(8,15,22,.36)'; ctl2d.fill();
+    // rail vertical du gaz, rempli selon le niveau
+    ctl2d.fillStyle = 'rgba(255,255,255,.12)'; roundRect(g.x - 8, g.y - R, 16, 2 * R, 8); ctl2d.fill();
+    const gy = g.y + (1 - 2 * throttle) * R;
+    ctl2d.fillStyle = 'rgba(111,208,255,.32)'; roundRect(g.x - 8, gy, 16, g.y + R - gy, 8); ctl2d.fill();
+    ctl2d.beginPath(); ctl2d.moveTo(g.x - R, g.y); ctl2d.lineTo(g.x + R, g.y);
+    ctl2d.strokeStyle = 'rgba(170,205,235,.13)'; ctl2d.lineWidth = 1.5; ctl2d.stroke();
+    ctl2d.beginPath(); ctl2d.arc(g.x, g.y, R, 0, 6.2832);
+    ctl2d.strokeStyle = 'rgba(170,205,235,.34)'; ctl2d.lineWidth = 2; ctl2d.stroke();
+    const gx = g.x + gas.rud * R;
+    const gr2 = ctl2d.createRadialGradient(gx - 9, gy - 11, 4, gx, gy, 34);
+    gr2.addColorStop(0, '#fff4dc'); gr2.addColorStop(0.55, '#f2b456'); gr2.addColorStop(1, '#9a5e1c');
+    ctl2d.beginPath(); ctl2d.arc(gx, gy, 31, 0, 6.2832);
+    ctl2d.fillStyle = gr2; ctl2d.fill();
+    ctl2d.strokeStyle = gas.on ? '#ffffff' : 'rgba(255,255,255,.55)'; ctl2d.lineWidth = 2.5; ctl2d.stroke();
+    ctl2d.fillStyle = '#2a1a08'; ctl2d.font = 'bold 12px ui-monospace,monospace';
+    ctl2d.fillText(Math.round(throttle * 100) + '%', gx, gy + 1);
+    ctl2d.fillStyle = 'rgba(210,232,248,.5)'; ctl2d.font = '10px ui-monospace,monospace';
+    ctl2d.fillText('GAZ  ◀ PALONNIER ▶', g.x, g.y + R + 38);
   }
 
   /* ---- vue cockpit : montants de verrière ---- */
@@ -2525,7 +2516,8 @@ function frame(now) {
   if (kb.t !== null) throttle = lerp(throttle, kb.t, 0.08);
   target.thr = throttle;
   if (throttle > 0.06) hintEl.classList.add('off');
-  if (rudTouch.on) target.rud = rudTouch.dir;
+  if (gas.on) target.rud = clamp(gas.rud * (0.6 + 0.4 * Math.abs(gas.rud)), -1, 1);
+  else if (rudTouch.on) target.rud = rudTouch.dir;
   else if (K('KeyQ') || K('KeyE')) target.rud = kb.r;
   else target.rud = 0;
 
