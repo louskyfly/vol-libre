@@ -476,6 +476,18 @@ const ROAD_GEN = [
   {"id":"D6","name":"Chemin de la Grotte","kind":1,"hw":3.4,"pts":[[-900,-10350],[-984,-10316],[-1075,-10302],[-1323,-10315],[-1465,-10393],[-1607,-10471],[-1758,-10611],[-1910,-10751],[-2019,-10829],[-2225,-10932],[-2432,-11036],[-2638,-11140],[-2770,-11184],[-2932,-11191],[-3072,-11160],[-3347,-11023],[-3500,-10900]]},
   {"id":"D7","name":"Piste des Crêtes","kind":1,"hw":3.4,"pts":[[5500,-3450],[5600,-3390],[5799,-3230],[5956,-3168],[6086,-3158],[6173,-3173],[6244,-3210],[6337,-3287],[6459,-3412],[6580,-3538],[6695,-3702],[6809,-3867],[6813,-3931],[6764,-4066],[6750,-4184],[6760,-4343],[6792,-4424],[6845,-4486],[6981,-4577],[7117,-4668],[7257,-4815],[7397,-4963],[7493,-5125],[7589,-5287],[7604,-5512],[7640,-5565],[7712,-5560],[7946,-5438],[8033,-5413],[8306,-5407],[8580,-5401],[8737,-5427],[9012,-5574],[9094,-5589],[9182,-5553],[9257,-5491],[9343,-5344],[9430,-5198],[9498,-5111],[9601,-5030],[9703,-4979],[9922,-4949],[10141,-4919],[10346,-4910],[10461,-4865],[10729,-4996],[10884,-5034],[10947,-5110],[10995,-5263],[10996,-5530],[10997,-5798],[10975,-5932],[10902,-6090],[10830,-6247],[10792,-6386],[10779,-6668],[10791,-6765],[10826,-6826],[10812,-6879]]}
 ];
+// pistes de terre qui relient les bouts de route isolés (le GPS passait par l'herbe)
+ROAD_GEN.push(
+  {"id":"P1","name":"Piste de l'Aéroport","kind":1,"hw":3.4,"pts":[[500,800],[425,900],[350,1000],[275,1075],[200,1169],[125,1281],[75,1359],[25,1450],[0,1500]]},
+  {"id":"P2","name":"Piste du Plateau","kind":1,"hw":3.4,"pts":[[1000,-250],[974,-145],[927,-48],[877,52],[827,152],[777,252],[727,352],[677,452],[627,552],[577,652],[526,751],[500,800]]},
+  {"id":"P3","name":"Piste du Rallye","kind":1,"hw":3.4,"pts":[[4905,-300],[4859,-398],[4807,-474],[4732,-533],[4635,-583],[4535,-633],[4447,-671],[4335,-683],[4218,-655],[4135,-555],[4085,-458],[4035,-358],[3985,-260],[3910,-186],[3810,-232],[3710,-233],[3610,-233],[3510,-244],[3435,-322],[3335,-334],[3235,-356],[3135,-333],[3035,-350],[2960,-282],[2914,-188],[2893,-143]]},
+  {"id":"P4","name":"Piste des Vergers","kind":1,"hw":3.4,"pts":[[9050,7080],[8986,7162],[8974,7271],[8977,7374],[9024,7496],[9074,7596],[9116,7688],[9080,7777],[9049,7871],[9050,7972],[9072,8069],[8973,8070],[8875,8022],[8780,8002],[8750,8097],[8636,8046],[8558,7974]]},
+  {"id":"P5","name":"Piste du Port","kind":1,"hw":3.4,"pts":[[11500,-7600],[11390,-7548],[11300,-7487],[11236,-7401],[11169,-7318],[11086,-7251],[10995,-7198],[10939,-7123],[10939,-7023],[10930,-6932],[10812,-6879]]},
+  {"id":"P6","name":"Piste du Tunnel","kind":1,"hw":3.4,"pts":[[-4750,8600],[-4790,8599]]},
+  {"id":"P7","name":"Piste de l'Aérodrome","kind":1,"hw":3.4,"pts":[[-12100,-10500],[-12025,-10425],[-11938,-10350],[-11851,-10300]]},
+  {"id":"P8","name":"Piste de la Grotte","kind":1,"hw":3.4,"pts":[[-3500,-10900],[-3500,-10800],[-3500,-10700],[-3500,-10600],[-3500,-10500],[-3472,-10372],[-3437,-10287],[-3430,-10194]]},
+  {"id":"P9","name":"Piste des Crêtes","kind":1,"hw":3.4,"pts":[[5500,-3450],[5512,-3467]]}
+);
 for (const D of ROAD_GEN) { D.gen = true; ROAD_DEF.push(D); }
 // pont suspendu au-dessus du canyon (sa géométrie sert aussi à la Route du Pont)
 const BRIDGE = (() => {
@@ -1056,7 +1068,7 @@ const roadTex = (kind) => {
         for (let c = 0; c < C; c++) {
           const x = R.X[i] + nx * OFF[c], z = R.Z[i] + nz * OFF[c];
           const edge = c === 0 || c === C - 1;
-          const y = edge ? (R.nt[i] ? R.Y[i] - 0.05 : Math.min(meshHeight(x, z) + 0.08, R.Y[i] - 0.05)) : R.Y[i] + lift + (c === 2 ? 0.05 : 0);
+          const y = edge ? (R.nt[i] ? R.Y[i] - 0.05 : Math.min(meshHeight(x, z) + 0.08, R.Y[i] - 0.05)) : (R.nt[i] ? R.Y[i] : Math.max(R.Y[i], meshHeight(x, z) + 0.1)) + lift + (c === 2 ? 0.05 : 0);   // jamais sous le relief
           b.P.push(x, y, z); b.UV.push(U[c], q * 4 / (R.kind ? 18 : 24));
         }
       }
@@ -4272,6 +4284,7 @@ function carSurface(x, z) {
   const r = roadNearest(x, z);
   if (r.r >= 0 && r.d < ROADS[r.r].hw + 0.8) return ROADS[r.r].kind;
   if (rallyNearest(x, z).d < 7.5) return 1;
+  if (gps && gps.pseg.length && onGpsPiste(x, z)) return 1;
   if (Math.hypot(x - CITY.x, z - CITY.z) < CITY.r - 20 || onHardSurface(x, z)) return 0;
   return 2;
 }
@@ -5347,6 +5360,7 @@ function gpsRoute(sx, sz, ex, ez) {
     const ex2 = G.extra.get(k); if (ex2) for (const e of ex2) nb.push(e);
     for (const [k2, w] of nb) { const nd = d + w; if (nd < dist[k2]) { dist[k2] = nd; prev[k2] = k; push(nd, k2); } }
   }
+  gps.legs = [[sx, sz, ROADS[a.r].X[a.i], ROADS[a.r].Z[a.i]], [ROADS[b.r].X[b.i], ROADS[b.r].Z[b.i], ex, ez]];
   const raw = [[sx, sz]];
   if (dist[E] < Infinity) { const ks = []; for (let k = E; k !== -1; k = prev[k]) ks.push(k); ks.reverse(); for (const k of ks) { const [ri, i] = G.where(k); raw.push([ROADS[ri].X[i], ROADS[ri].Z[i]]); } }
   raw.push([ex, ez]);
@@ -5360,7 +5374,45 @@ function gpsRoute(sx, sz, ex, ez) {
   P.push(raw[raw.length - 1]);
   return P;
 }
-const gps = { dest: null, path: null, prog: 0, reT: 0 };
+var gps = { dest: null, path: null, prog: 0, reT: 0, legs: null, pseg: [] };
+// piste de terre tracée par le GPS là où il n'y a pas de route (départ hors route, destination dans la nature)
+const gpsPisteMat = new THREE.MeshLambertMaterial({ map: roadTex(1) });
+let gpsPisteMesh = null;
+function gpsPisteBuild() {
+  if (gpsPisteMesh) { scene.remove(gpsPisteMesh); gpsPisteMesh.geometry.dispose(); gpsPisteMesh = null; }
+  gps.pseg = [];
+  if (!gps.legs) return;
+  const P = [], UV = [], I = []; let nv = 0;
+  const OFF = [-5.6, -3.4, 0, 3.4, 5.6], U = [0, 2.2 / 11.2, 0.5, 1 - 2.2 / 11.2, 1], C = OFF.length;
+  for (const [x0, z0, x1, z1] of gps.legs) {
+    const L = Math.hypot(x1 - x0, z1 - z0); if (L < 15) continue;
+    gps.pseg.push([x0, z0, x1, z1]);
+    const tx = (x1 - x0) / L, tz = (z1 - z0) / L, nx = -tz, nz = tx, m = Math.ceil(L / 4), base = nv;
+    for (let q = 0; q <= m; q++) {
+      const cx = x0 + tx * L * q / m, cz = z0 + tz * L * q / m;
+      for (let c = 0; c < C; c++) {
+        const x = cx + nx * OFF[c], z = cz + nz * OFF[c], edge = c === 0 || c === C - 1;
+        P.push(x, meshHeight(x, z) + (edge ? 0.06 : 0.16), z); UV.push(U[c], q * L / m / 18);
+      }
+    }
+    for (let q = 0; q < m; q++) for (let c = 0; c < C - 1; c++) { const a = base + q * C + c, b = a + C; I.push(a, a + 1, b, a + 1, b + 1, b); }
+    nv += (m + 1) * C;
+  }
+  if (!nv) return;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(P), 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(UV), 2));
+  geo.setIndex(I); geo.computeVertexNormals(); geo.computeBoundingSphere();
+  gpsPisteMesh = new THREE.Mesh(geo, gpsPisteMat); gpsPisteMesh.receiveShadow = true;
+  scene.add(gpsPisteMesh);
+}
+function onGpsPiste(x, z) {
+  for (const [x0, z0, x1, z1] of gps.pseg) {
+    const tx = x1 - x0, tz = z1 - z0, l2 = tx * tx + tz * tz || 1, t = clamp(((x - x0) * tx + (z - z0) * tz) / l2, 0, 1);
+    if (Math.hypot(x - x0 - tx * t, z - z0 - tz * t) < 4.2) return true;
+  }
+  return false;
+}
 const GPS_ARROWS = 36;
 const gpsArrows = (() => {
   const sh = new THREE.Shape();
@@ -5372,10 +5424,10 @@ const gpsArrows = (() => {
 })();
 function gpsSet(x, z) {
   gps.dest = [x, z]; gps.prog = 0;
-  gps.path = gpsRoute(pos.x, pos.z, x, z);
+  gps.path = gpsRoute(pos.x, pos.z, x, z); gpsPisteBuild();
   toast('Itinéraire : ' + (gps.path.length * 10 / 1000).toFixed(1) + ' km');
 }
-function gpsClear() { gps.dest = null; gps.path = null; gpsArrows.count = 0; }
+function gpsClear() { gps.dest = null; gps.path = null; gps.legs = null; gpsPisteBuild(); gpsArrows.count = 0; }
 const _gm = new THREE.Matrix4(), _gq = new THREE.Quaternion(), _gs = new THREE.Vector3(1, 1, 1), _gp = new THREE.Vector3(), _gy = new THREE.Vector3(0, 1, 0);
 function updateGps(dt) {
   if (!gps.path) { gpsArrows.count = 0; return; }
@@ -5384,7 +5436,7 @@ function updateGps(dt) {
   let bi = gps.prog, bd = 1e18;
   for (let i = gps.prog; i < Math.min(P.length, gps.prog + 40); i++) { const d = (P[i][0] - pos.x) ** 2 + (P[i][1] - pos.z) ** 2; if (d < bd) { bd = d; bi = i; } }
   gps.prog = bi; gps.reT -= dt;
-  if (bd > 70 * 70 && gps.reT <= 0) { gps.reT = 2; gps.path = gpsRoute(pos.x, pos.z, gps.dest[0], gps.dest[1]); gps.prog = 0; return; }
+  if (bd > 70 * 70 && gps.reT <= 0) { gps.reT = 2; gps.path = gpsRoute(pos.x, pos.z, gps.dest[0], gps.dest[1]); gpsPisteBuild(); gps.prog = 0; return; }
   if (!(rally && rally.on)) { gpsArrows.count = 0; return; }
   let n = 0;
   for (let i = gps.prog + 1; i < P.length - 1 && n < GPS_ARROWS; i += 1) {
@@ -5474,7 +5526,7 @@ window.__trafSim = (n, dt) => { const st = { sw: 0, ring: 0, uturn: 0 }; const p
   st.roads = {}; for (const c of traffic.cars) st.roads[ROADS[c.ri].id] = (st.roads[ROADS[c.ri].id] || 0) + 1; return st; };
 window.__trafCars = () => traffic.cars;
 window.__junc = () => JUNC.map((L, ri) => [ROADS[ri].id, L.map(J => ROADS[J.rj].id + '@' + J.i + (J.end ? 'E' : ''))]);
-window.__gps = (x, z) => { if (x !== undefined) gpsSet(x, z); return gps.path ? { n: gps.path.length, prog: gps.prog, arrows: gpsArrows.count, dest: gps.dest } : null; };
+window.__gps = (x, z) => { if (x !== undefined) gpsSet(x, z); return gps.path ? { n: gps.path.length, prog: gps.prog, arrows: gpsArrows.count, dest: gps.dest, legs: gps.pseg.map(a => a.map(Math.round)) } : null; };
 window.__gpsPt = (i) => gps.path && gps.path[Math.min(i, gps.path.length - 1)];
 window.__bigMap = (o) => { if (o) bigMapOpen(); else bigMapClose(); };
 
