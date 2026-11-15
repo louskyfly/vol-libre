@@ -79,7 +79,16 @@
   #cmenu .num{display:flex;align-items:center;gap:12px;font-size:26px;font-weight:700}
   #cmenu .num button,#cmenu .row button,#rmenu .pi{font:inherit;font-size:14px;color:#dfeefb;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:8px 14px}
   #cmenu .row{display:flex;gap:8px;margin-top:14px;justify-content:flex-end}
-  #pmenu,#cmenu,#rmenu{z-index:20}
+  #pmenu,#cmenu,#rmenu,#vmenu{z-index:20}
+  #vmenu{position:absolute;inset:0;display:none;align-items:flex-start;justify-content:center;padding-top:56px;background:rgba(6,10,14,.45);backdrop-filter:blur(3px);pointer-events:auto}
+  #vmenu.on{display:flex}
+  #vmenu .card{background:rgba(10,16,22,.94);border:1px solid rgba(170,210,240,.18);border-radius:14px;padding:12px 14px;max-width:min(560px,92vw);max-height:80vh;overflow:auto;color:#dbe9f5}
+  #vmenu .title{font-size:12px;letter-spacing:.12em;opacity:.6;margin:8px 2px 8px}
+  #vmenu .grid{display:grid;gap:8px;grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+  #vmenu .pi{font:inherit;font-size:14px;color:#dfeefb;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:10px;text-align:left;padding:10px 12px}
+  #vmenu .pi small{display:block;opacity:.6;font-size:11px;margin-top:3px}
+  #vmenu .pi.sel{border-color:#fff;box-shadow:0 0 0 2px rgba(120,200,255,.6)}
+  #vmenu .pi i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:7px;vertical-align:-1px}
   #rmenu{position:absolute;inset:0;display:none;align-items:flex-start;justify-content:center;padding-top:56px;background:rgba(6,10,14,.45);backdrop-filter:blur(3px);pointer-events:auto}
   #rmenu.on{display:flex}
   #rmenu .grid{display:grid;gap:8px}
@@ -110,6 +119,7 @@
   <div class="num"><button id="nMinus">−</button><span id="nVal">00</span><button id="nPlus">+</button><button id="nNone" style="font-size:12px">SANS</button></div>
   <div class="row"><button id="cDefault">PAR DÉFAUT</button><button id="cOk">OK</button></div>
 </div></div>
+<div id="vmenu" aria-hidden="true"><div class="card"><div class="title">VOITURE</div><div class="grid" id="vcars"></div><div class="title">JEUX</div><div class="grid" id="vgrid"></div></div></div>
 <div id="rmenu" aria-hidden="true"><div class="card"><div class="title">COURSES D'ANNEAUX</div><div class="grid" id="rgrid"></div></div></div>
 <div id="hud">
   <div class="r"><span class="k">VIT</span><span class="v" id="spd">0<small> kt</small></span></div>
@@ -129,7 +139,7 @@
   <button id="bpiste">PISTE</button>
   <button id="bcourse">COURSE</button>
   <button id="bcombat">COMBAT</button>
-  <button id="brally">RALLYE</button>
+  <button id="brally">VOITURE</button>
   <button id="bpaint">PEINTURE</button>
   <button id="breset">RESET</button>
 </div>
@@ -351,7 +361,7 @@ function airportMask(x, z) {
   return Math.max(1 - smoothstep(40, 260, d), 1 - smoothstep(40, 420, d4));
 }
 
-function terrainHeight(x, z) {
+function terrainBase(x, z) {
   const r = Math.hypot(x, z);
   const R = 16500;
   let mask = 1 - smoothstep(R * 0.55, R, r);
@@ -408,7 +418,132 @@ function terrainHeight(x, z) {
 function groundAt(x, z) {
   if (onCarrier(x, z)) return CARRIER.deckY;
   const r = HARD.find(r => inRectXZ(x, z, r));
-  return r ? (r.y ?? RW_Y) : terrainHeight(x, z);
+  if (r) return r.y ?? RW_Y;
+  const n = roadNearest(x, z);
+  if (n.r >= 0 && n.d < ROADS[n.r].hw) return n.y;
+  return terrainHeight(x, z);
+}
+
+/* ------------------------------------------------------------------ */
+/*  routes goudronnées et sentiers de terre                             */
+/* ------------------------------------------------------------------ */
+// kind 0 = goudron, 1 = terre ; hw = demi-largeur ; tracés posés dans les vallées
+const ROAD_DEF = [
+  { id: 'A1', name: 'Route de la Ville', kind: 0, hw: 5.5, pts: [[500,800],[1750,1600],[3100,1650],[4100,1800],[6000,1800],[8000,1800],[9300,2400],[9900,3200],[9300,4100],[8600,4700],[8560,5250],[8803,5382],[9000,5382],[10600,5382],[12200,5382]] },
+  { id: 'A2', name: 'Route du Col', kind: 0, hw: 5.5, pts: [[11032,7820],[11032,7600],[11032,6000],[11032,4500],[11032,4180],[11200,3980],[11600,3880],[12400,3600],[12900,2700],[13500,1800],[13500,600]] },
+  { id: 'A3', name: 'Route du Canyon', kind: 0, hw: 5, pts: [[-250,-1000],[-2000,-1000],[-3000,-1000],[-4000,-1100],[-4350,-1800],[-4800,-3000],[-5100,-3400]] },
+  { id: 'A4', name: 'Route du Sud', kind: 0, hw: 5, pts: [[0,1500],[0,2300],[-700,2800],[-1800,3050],[-2500,3500],[-2600,4400],[-3400,4700],[-3750,5300],[-4250,6000],[-4750,6800],[-4750,9200],[-4400,10000],[-3000,11500],[-1000,13400],[0,13750]] },
+  { id: 'D1', name: 'Chemin du Rallye', kind: 1, hw: 3.4, pts: [[1000,-250],[1600,-500],[2300,-600],[2800,-850],[3300,-700],[3900,-400],[4500,-310],[4905,-300]] },
+  { id: 'D2', name: 'Chemin des Collines', kind: 1, hw: 3.4, pts: [[-2550,4300],[-1500,5200],[0,6300],[1000,6250],[2000,6200],[3000,5200],[3800,4300],[5000,4250],[6200,5200],[7300,6400],[8200,7100],[9050,7080]] },
+  { id: 'D3', name: 'Sentier du Canyon', kind: 1, hw: 3.4, pts: [[-4800,-3000],[-5000,-2000],[-4900,-700],[-4500,300],[-4400,1300],[-4000,2300],[-4000,3500],[-4300,4700],[-4250,6000]] }
+];
+const ROADS = [];
+const RD_CELL = 40, RC_CELL = 160, rdGrid = new Map(), rcGrid = new Map();
+{
+  const spline = (P) => {
+    const raw = [];
+    for (let i = 0; i < P.length - 1; i++) {
+      const p0 = P[Math.max(i - 1, 0)], p1 = P[i], p2 = P[i + 1], p3 = P[Math.min(i + 2, P.length - 1)];
+      const m = Math.max(2, Math.ceil(Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) / 2));
+      for (let k = 0; k < m; k++) {
+        const t = k / m, t2 = t * t, t3 = t2 * t;
+        const f = (a, b, c, d) => 0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (-a + 3 * b - 3 * c + d) * t3);
+        raw.push([f(p0[0], p1[0], p2[0], p3[0]), f(p0[1], p1[1], p2[1], p3[1])]);
+      }
+    }
+    raw.push(P[P.length - 1]);
+    let L = 0; const cum = [0];
+    for (let i = 1; i < raw.length; i++) { L += Math.hypot(raw[i][0] - raw[i - 1][0], raw[i][1] - raw[i - 1][1]); cum.push(L); }
+    const n = Math.max(2, Math.round(L / 4) + 1), X = new Float32Array(n), Z = new Float32Array(n);
+    for (let k = 0, j = 0; k < n; k++) {
+      const s = k / (n - 1) * L; while (j < raw.length - 2 && cum[j + 1] < s) j++;
+      const t = clamp((s - cum[j]) / ((cum[j + 1] - cum[j]) || 1), 0, 1);
+      X[k] = raw[j][0] + (raw[j + 1][0] - raw[j][0]) * t; Z[k] = raw[j][1] + (raw[j + 1][1] - raw[j][1]) * t;
+    }
+    return { X, Z, n, len: L };
+  };
+  const smooth = (Y, r) => {
+    const n = Y.length, o = new Float32Array(n);
+    for (let i = 0; i < n; i++) { let a = 0, c = 0; for (let k = Math.max(0, i - r); k <= Math.min(n - 1, i + r); k++) { a += Y[k]; c++; } o[i] = a / c; }
+    return o;
+  };
+  const near0 = (x, z) => {             // profil d'une route déjà construite, près de (x, z)
+    let best = null, bd = 45 * 45;
+    for (const R of ROADS) for (let i = 0; i < R.n; i += 2) { const d = (R.X[i] - x) ** 2 + (R.Z[i] - z) ** 2; if (d < bd) { bd = d; best = R.Y[i]; } }
+    return best;
+  };
+  for (const D of ROAD_DEF) {
+    const sp = spline(D.pts), n = sp.n;
+    let Y = new Float32Array(n);
+    const city = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      if (cityMask(sp.X[i], sp.Z[i]) > 0.3) { city[i] = 1; Y[i] = PL_Y + 0.62; }
+      else Y[i] = Math.max(terrainBase(sp.X[i], sp.Z[i]), 3);
+    }
+    Y = smooth(smooth(Y, 40), 40);
+    const g = (D.kind ? 0.12 : 0.085) * 4;          // pente max (8,5 % goudron, 12 % terre)
+    // enveloppe basse : la route entaille les bosses plutôt que de flotter au-dessus des creux
+    for (let i = 1; i < n; i++) Y[i] = Math.min(Y[i], Y[i - 1] + g);
+    for (let i = n - 2; i >= 0; i--) Y[i] = Math.min(Y[i], Y[i + 1] + g);
+    // raccords aux routes déjà posées (départ et arrivée)
+    const pin = (i0, dir) => {
+      const v = near0(sp.X[i0], sp.Z[i0]); if (v === null) return;
+      const d0 = v - Y[i0];
+      const PL = Math.min(260, n - 1); for (let k = 0; k < PL; k++) { const i = i0 + dir * k; if (i < 0 || i >= n) break; Y[i] += d0 * (1 - k / PL); }
+    };
+    pin(0, 1); pin(n - 1, -1);
+    Y = smooth(Y, 6);
+    for (let i = 0; i < n; i++) { if (city[i] && cityMask(sp.X[i], sp.Z[i]) > 0.55) Y[i] = Math.max(Y[i], PL_Y + 0.62); Y[i] = Math.max(Y[i], 2.5); }
+    const R = { def: D, id: D.id, name: D.name, kind: D.kind, hw: D.hw, X: sp.X, Z: sp.Z, Y, n, len: sp.len };
+    const ri = ROADS.length; ROADS.push(R);
+    for (let i = 0; i < n; i++) {
+      const k = Math.floor(sp.X[i] / RD_CELL) * 100003 + Math.floor(sp.Z[i] / RD_CELL);
+      let a = rdGrid.get(k); if (!a) rdGrid.set(k, a = []); a.push(ri * 1e6 + i);
+      if (i % 4 === 0 || i === n - 1) {
+        const k2 = Math.floor(sp.X[i] / RC_CELL) * 100003 + Math.floor(sp.Z[i] / RC_CELL);
+        let b = rcGrid.get(k2); if (!b) rcGrid.set(k2, b = []); b.push(ri * 1e6 + i);
+      }
+    }
+  }
+}
+// route la plus proche (précis, à moins de ~40 m) : route, échantillon, distance, côté, hauteur
+const _rd = { r: -1, i: 0, d: 999, s: 0, y: 0 };
+function roadNearest(x, z) {
+  const cx = Math.floor(x / RD_CELL), cz = Math.floor(z / RD_CELL);
+  let bk = -1, bd = 1e12;
+  for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
+    const L = rdGrid.get((cx + a) * 100003 + cz + b); if (!L) continue;
+    for (const k of L) { const R = ROADS[(k / 1e6) | 0], i = k % 1e6, d = (R.X[i] - x) ** 2 + (R.Z[i] - z) ** 2; if (d < bd) { bd = d; bk = k; } }
+  }
+  if (bk < 0) { _rd.r = -1; _rd.d = 999; return _rd; }
+  const ri = (bk / 1e6) | 0, R = ROADS[ri], i = bk % 1e6;
+  const j = i < R.n - 1 ? i : i - 1, ax = R.X[j], az = R.Z[j], tx = R.X[j + 1] - ax, tz = R.Z[j + 1] - az, tl2 = tx * tx + tz * tz || 1;
+  const t = clamp(((x - ax) * tx + (z - az) * tz) / tl2, 0, 1), tl = Math.sqrt(tl2);
+  const s = ((x - ax) * (-tz) + (z - az) * tx) / tl;
+  _rd.r = ri; _rd.i = i; _rd.s = s;
+  _rd.d = (t > 0 && t < 1) ? Math.abs(s) : Math.sqrt(bd);
+  _rd.y = R.Y[j] + (R.Y[j + 1] - R.Y[j]) * t;
+  return _rd;
+}
+// version grossière (jusqu'à ~330 m) pour terrasser le relief autour des routes : la plus proche de chaque route
+const _rcD = new Float64Array(16), _rcY = new Float64Array(16), _rcT = [];
+function terrainHeight(x, z) {
+  const h = terrainBase(x, z);
+  const cx = Math.floor(x / RC_CELL), cz = Math.floor(z / RC_CELL), NR = ROADS.length;
+  for (let r = 0; r < NR; r++) _rcD[r] = 330 * 330;
+  let any = false;
+  for (let a = -2; a <= 2; a++) for (let b = -2; b <= 2; b++) {
+    const L = rcGrid.get((cx + a) * 100003 + cz + b); if (!L) continue;
+    for (const k of L) { const r = (k / 1e6) | 0, R = ROADS[r], i = k % 1e6, d = (R.X[i] - x) ** 2 + (R.Z[i] - z) ** 2; if (d < _rcD[r]) { _rcD[r] = d; _rcY[r] = R.Y[i]; any = true; } }
+  }
+  if (!any) return h;
+  // plusieurs routes proches : on applique la plus basse en dernier (le relief ne dépasse jamais d'une route)
+  _rcT.length = 0;
+  for (let r = 0; r < NR; r++) if (_rcD[r] < 330 * 330) _rcT.push(r);
+  _rcT.sort((p, q) => _rcY[q] - _rcY[p]);
+  let out = h;
+  for (const r of _rcT) { const w = 1 - smoothstep(140, 330, Math.sqrt(_rcD[r])); if (w > 0) out = lerp(out, _rcY[r] - 1.0, w); }
+  return out;
 }
 
 /* ------------------------------------------------------------------ */
@@ -671,6 +806,61 @@ function meshHeight(x, z) {
 }
 scene.add(terrain);
 
+// --- rubans des routes : goudron (lignes blanches, tirets au milieu) et terre
+const roadTex = (kind) => {
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 256;
+  const g = cv.getContext('2d');
+  if (kind === 0) {
+    g.fillStyle = '#8a8270'; g.fillRect(0, 0, 128, 256);                 // bas-côtés gravillonnés
+    g.fillStyle = '#3d4045'; g.fillRect(22, 0, 84, 256);                 // chaussée
+    for (let i = 0; i < 2600; i++) { g.fillStyle = Math.random() < 0.5 ? 'rgba(0,0,0,.18)' : 'rgba(255,255,255,.08)'; g.fillRect(22 + Math.random() * 84, Math.random() * 256, 1.5, 1.5); }
+    for (let i = 0; i < 500; i++) { g.fillStyle = 'rgba(60,50,35,.35)'; g.fillRect(Math.random() < 0.5 ? Math.random() * 22 : 106 + Math.random() * 22, Math.random() * 256, 2, 2); }
+    g.fillStyle = '#e9e7df'; g.fillRect(25, 0, 3, 256); g.fillRect(100, 0, 3, 256);   // lignes de rive
+    g.fillStyle = '#f0e6b8'; g.fillRect(62.5, 0, 3, 120);                              // tiret central
+  } else {
+    const grd = g.createLinearGradient(0, 0, 128, 0);
+    grd.addColorStop(0, '#5f6e3e'); grd.addColorStop(0.2, '#86704c'); grd.addColorStop(0.5, '#9a7f5a'); grd.addColorStop(0.8, '#86704c'); grd.addColorStop(1, '#5f6e3e');
+    g.fillStyle = grd; g.fillRect(0, 0, 128, 256);
+    for (let i = 0; i < 2000; i++) { g.fillStyle = Math.random() < 0.5 ? 'rgba(60,44,28,0.35)' : 'rgba(205,185,150,0.3)'; g.beginPath(); g.arc(Math.random() * 128, Math.random() * 256, 0.6 + Math.random() * 2, 0, 7); g.fill(); }
+    g.fillStyle = 'rgba(70,52,34,.35)'; g.fillRect(36, 0, 12, 256); g.fillRect(80, 0, 12, 256);   // ornières
+  }
+  const t = new THREE.CanvasTexture(cv); t.wrapS = THREE.ClampToEdgeWrapping; t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; return t;
+};
+{
+  const mats = [new THREE.MeshLambertMaterial({ map: roadTex(0) }), new THREE.MeshLambertMaterial({ map: roadTex(1) })];
+  for (const R of ROADS) {
+    const hw = R.hw, sh = R.kind ? 2.2 : 3.2, W = 2 * (hw + sh);
+    const OFF = [-hw - sh, -hw, 0, hw, hw + sh];
+    const U = [0, sh / W, 0.5, 1 - sh / W, 1];
+    if (R.kind === 0) { U[1] = 22 / 128; U[3] = 106 / 128; }
+    const C = OFF.length, n = R.n;
+    const P = new Float32Array(n * C * 3), UV = new Float32Array(n * C * 2), idx = [];
+    for (let i = 0; i < n; i++) {
+      const a = Math.max(i - 1, 0), b = Math.min(i + 1, n - 1);
+      const tx = R.X[b] - R.X[a], tz = R.Z[b] - R.Z[a], tl = Math.hypot(tx, tz) || 1, nx = -tz / tl, nz = tx / tl;
+      for (let c = 0; c < C; c++) {
+        const x = R.X[i] + nx * OFF[c], z = R.Z[i] + nz * OFF[c], j = i * C + c;
+        const edge = c === 0 || c === C - 1;
+        P[j * 3] = x; P[j * 3 + 2] = z;
+        P[j * 3 + 1] = edge ? Math.min(meshHeight(x, z) + 0.08, R.Y[i] - 0.05) : R.Y[i] + (c === 2 ? 0.05 : 0);
+        UV[j * 2] = U[c]; UV[j * 2 + 1] = i * 4 / (R.kind ? 18 : 24);
+      }
+    }
+    for (let i = 0; i < n - 1; i++) for (let c = 0; c < C - 1; c++) { const a = i * C + c, b = a + C; idx.push(a, b, a + 1, a + 1, b, b + 1); }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(P, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(UV, 2));
+    geo.setIndex(idx); geo.computeVertexNormals();
+    { const nn = geo.attributes.normal; let up = 0; for (let i = 0; i < nn.count; i++) up += nn.getY(i);
+      if (up < 0) { for (let i = 0; i < idx.length; i += 3) { const t = idx[i + 1]; idx[i + 1] = idx[i + 2]; idx[i + 2] = t; } geo.setIndex(idx); geo.computeVertexNormals(); } }
+    const m = new THREE.Mesh(geo, mats[R.kind]);
+    m.receiveShadow = true;
+    scene.add(m);
+  }
+  // panneaux de direction aux départs des routes
+}
+
 // --- forêt (instanciée : un seul appel de dessin)
 const TREE_COLS = ['#1e3a1a', '#2a4a22', '#33531f', '#254127', '#1b3320'];
 {
@@ -745,7 +935,7 @@ function hitObstacle(p, m) {
   return null;
 }
 function decorNoTree(x, z) {
-  return Math.hypot(x - CITY.x, z - CITY.z) < CITY.R - 300 || canyonDist(x, z) < CANYON.rw + 30 || rallyNearest(x, z).d < 16;
+  return Math.hypot(x - CITY.x, z - CITY.z) < CITY.R - 300 || canyonDist(x, z) < CANYON.rw + 30 || rallyNearest(x, z).d < 16 || roadNearest(x, z).d < 14;
 }
 const decorAnim = [];            // fonctions (dt, t) appelées à chaque image
 const cityNight = { value: 0 };
@@ -2220,7 +2410,7 @@ const _shR = new THREE.Vector3(), _shU = new THREE.Vector3(), _shP = new THREE.V
 const hintEl = document.getElementById('hint');
 function cycleCam() { camMode = (camMode + 1) % 3; }
 document.getElementById('bcam').addEventListener('click', e => { e.stopPropagation(); cycleCam(); });
-document.getElementById('breset').addEventListener('click', e => { e.stopPropagation(); if (rally && rally.on) rallyStart(); else reset(); });
+document.getElementById('breset').addEventListener('click', e => { e.stopPropagation(); if (rally && rally.on) carStart(rally.mode, rally.opt); else reset(); });
 document.getElementById('bpiste').addEventListener('click', e => {
   e.stopPropagation();
   airportIdx = (airportIdx + 1) % AIRPORTS.length;
@@ -2398,7 +2588,7 @@ function drawMap() {
   c.save();
   c.beginPath(); c.arc(S / 2, S / 2, S / 2 - 2, 0, 6.2832); c.clip();
   // carte zoomée centrée sur l'avion (fenêtre de 18 km)
-  const W = (rally && rally.on) ? 3200 : 18000, kk = S / W;
+  const W = (rally && rally.on) ? (rally.mode === 'deliv' || rally.mode === 'sprint' ? 5200 : 3200) : 18000, kk = S / W;
   c.fillStyle = 'rgb(24,62,96)'; c.fillRect(0, 0, S, S);
   c.imageSmoothingEnabled = true;
   c.drawImage(mapTiles, S / 2 + (-T_SIZE / 2 - pos.x) * kk, S / 2 + (-T_SIZE / 2 - pos.z) * kk, T_SIZE * kk, T_SIZE * kk);
@@ -2414,6 +2604,24 @@ function drawMap() {
   c.stroke();
   if (window.__BRIDGE) { const B = window.__BRIDGE; c.strokeStyle = '#e0553a'; c.lineWidth = 2.5; c.beginPath();
     c.moveTo(S / 2 + (B.x - B.nx * 470 - pos.x) * kk, S / 2 + (B.z - B.nz * 470 - pos.z) * kk); c.lineTo(S / 2 + (B.x + B.nx * 470 - pos.x) * kk, S / 2 + (B.z + B.nz * 470 - pos.z) * kk); c.stroke(); }
+  // routes (goudron gris clair, chemins en terre)
+  for (const Rd of ROADS) {
+    c.strokeStyle = Rd.kind ? 'rgba(200,160,105,.9)' : 'rgba(236,236,228,.95)'; c.lineWidth = rally && rally.on ? (Rd.kind ? 2.5 : 3.5) : (Rd.kind ? 1 : 1.6);
+    c.beginPath();
+    for (let i = 0; i < Rd.n; i += 8) { const X = S / 2 + (Rd.X[i] - pos.x) * kk, Y = S / 2 + (Rd.Z[i] - pos.z) * kk; i ? c.lineTo(X, Y) : c.moveTo(X, Y); }
+    c.lineTo(S / 2 + (Rd.X[Rd.n - 1] - pos.x) * kk, S / 2 + (Rd.Z[Rd.n - 1] - pos.z) * kk);
+    c.stroke();
+  }
+  if (rally && rally.on && rally.mode !== 'rally') {
+    const T = carTarget();
+    if (T) {
+      let X = (T[0] - pos.x) * kk, Y = (T[1] - pos.z) * kk; const L = Math.hypot(X, Y), M = S / 2 - 7;
+      if (L > M) { X *= M / L; Y *= M / L; }
+      c.fillStyle = rally.mode === 'deliv' && rally.job && rally.job.phase === 'drop' ? '#48e07a' : '#ffd23a';
+      c.strokeStyle = 'rgba(0,0,0,.6)'; c.lineWidth = 1.5;
+      c.beginPath(); c.arc(S / 2 + X, S / 2 + Y, 5, 0, 6.2832); c.fill(); c.stroke();
+    }
+  }
   if (combat && combat.on) { c.fillStyle = '#ff3b2a'; for (const b of combat.bots) if (!b.dead) { c.beginPath(); c.arc(S / 2 + (b.pos.x - pos.x) * kk, S / 2 + (b.pos.z - pos.z) * kk, 3, 0, 6.2832); c.fill(); } }
   if (rally && rally.on) {
     c.strokeStyle = 'rgba(214,170,110,.95)'; c.lineWidth = 3; c.beginPath();
@@ -3216,13 +3424,30 @@ window.__fire = (v) => { combat.fire = !!v; };
 var rally = { on: false, state: 'off', t: 0, count: 0, cps: [], next: 0, idx: 0, lastCp: 0,
   yaw: 0, steer: 0, wheel: 0, kSteer: 0, pitch: 0, roll: 0, air: false, vy: 0, hg: 0,
   gas: 0, brake: 0, inSteer: 0, vr: 0, spin: 0, bodyRoll: 0, bodyPitch: 0, vfPrev: 0, yawRate: 0, dustT: 0, waterT: 0, rpm: 0, gear: 1, vf: 0, onRoad: true,
-  wheelTouch: null, pedals: new Map(), countShown: 99 };
+  wheelTouch: null, pedals: new Map(), countShown: 99, mode: 'rally', opt: 0, gatesIdx: [], surf: 2, job: null, jobT: 0, delivered: 0, lastGate: 0, sdir: 1 };
 const RALLY_KEY = 'Rallye · ' + RALLY.name;
 const RN = RALLY_P.length;
-// hauteur de roulage : relief dessiné + bombé de la piste
+// hauteur de roulage : relief dessiné, bombé de la spéciale, routes, ville, pistes d'aéroport
 function carGround(x, z) {
+  let g = meshHeight(x, z);
   const n = rallyNearest(x, z);
-  return meshHeight(x, z) + (n.d < 9 ? 0.45 * (1 - smoothstep(6, 8.5, n.d)) : 0);
+  if (n.d < 9) g += 0.45 * (1 - smoothstep(6, 8.5, n.d));
+  const r = roadNearest(x, z);
+  if (r.r >= 0) {
+    const R = ROADS[r.r], sh = R.kind ? 2.2 : 3.2;
+    if (r.d < R.hw) g = Math.max(g, r.y); else if (r.d < R.hw + sh) g = Math.max(g, lerp(r.y, g, (r.d - R.hw) / sh));
+  }
+  if (Math.hypot(x - CITY.x, z - CITY.z) < CITY.r - 20) g = Math.max(g, PL_Y + 0.35);
+  for (const q of HARD) if (inRectXZ(x, z, q)) { g = Math.max(g, q.y ?? RW_Y); break; }
+  return g;
+}
+// revêtement sous la voiture : 0 goudron, 1 terre, 2 herbe
+function carSurface(x, z) {
+  const r = roadNearest(x, z);
+  if (r.r >= 0 && r.d < ROADS[r.r].hw + 0.8) return ROADS[r.r].kind;
+  if (rallyNearest(x, z).d < 7.5) return 1;
+  if (Math.hypot(x - CITY.x, z - CITY.z) < CITY.r - 20 || onHardSurface(x, z)) return 0;
+  return 2;
 }
 
 // --- la piste : ruban de terre posé sur le relief
@@ -3321,59 +3546,107 @@ function carGround(x, z) {
   rally.nextMat = new THREE.MeshBasicMaterial({ map: bannerTex('PROCHAIN CONTRÔLE', '#e0a020'), side: THREE.DoubleSide, fog: true });
 }
 
-// --- la voiture de rallye
-const rallyCar = (() => {
+// --- les trois voitures : réglages (index de revêtement : 0 goudron, 1 terre, 2 herbe)
+const CARS = [
+  { name: 'Rallye n°7', desc: 'Équilibrée, à l\'aise partout', color: '#1f5fbf', num: '7',
+    vmax: [55, 48, 34], acc: 12.5, brake: 22, grip: [6.2, 5.2, 3.6], ymax: [13.5, 12.5, 9.5], roll: [0.02, 0.03, 0.22], wr: 0.34, tw: 0.86, wb: 1.3, susp: 0.16 },
+  { name: 'Sportive GT', desc: 'Très rapide sur le goudron, glisse sur la terre', color: '#c8241c', num: '23',
+    vmax: [78, 40, 26], acc: 16, brake: 27, grip: [8.5, 3.6, 2.6], ymax: [17, 9, 7], roll: [0.012, 0.07, 0.32], wr: 0.36, tw: 0.99, wb: 1.42, susp: 0.08 },
+  { name: 'Buggy 4x4', desc: 'Passe partout, saute loin, moins rapide', color: '#e07a1a', num: '4',
+    vmax: [44, 44, 40], acc: 12, brake: 19, grip: [5.2, 5.6, 5.2], ymax: [11.5, 12.5, 12], roll: [0.03, 0.035, 0.05], wr: 0.52, tw: 1.0, wb: 1.3, susp: 0.32 }
+];
+const CAR_KEY = 'vollibre.car.v1';
+var carIdx = 0; try { carIdx = clamp(parseInt(localStorage.getItem(CAR_KEY)) || 0, 0, CARS.length - 1); } catch (e) {}
+function buildCar(spec, style) {
   const g = new THREE.Group(), body = new THREE.Group();
-  const paint = new THREE.MeshStandardMaterial({ color: 0x1f5fbf, roughness: 0.38, metalness: 0.25 });
+  const paint = new THREE.MeshStandardMaterial({ color: spec.color, roughness: 0.35, metalness: 0.3 });
   const white = new THREE.MeshStandardMaterial({ color: 0xf2f2ee, roughness: 0.5 });
   const dark = new THREE.MeshStandardMaterial({ color: 0x15181c, roughness: 0.7 });
+  const chrome = new THREE.MeshStandardMaterial({ color: 0xc8ccd0, roughness: 0.25, metalness: 0.8 });
   const glass = new THREE.MeshStandardMaterial({ color: 0x1b2a38, roughness: 0.12, metalness: 0.6 });
-  const box = (w, h, l, m, x, y, z) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), m); o.position.set(x, y, z); o.castShadow = true; body.add(o); return o; };
-  box(1.82, 0.5, 4.0, paint, 0, 0.62, 0);            // caisse
-  box(1.84, 0.2, 4.04, dark, 0, 0.42, 0);            // bas de caisse
-  box(1.74, 0.12, 1.3, paint, 0, 0.92, -1.25).rotation.x = -0.08;   // capot
-  box(1.5, 0.5, 1.9, paint, 0, 1.1, 0.25);            // habitacle
-  box(1.44, 0.42, 0.08, glass, 0, 1.08, -0.72).rotation.x = 0.55;  // pare-brise
-  box(1.52, 0.36, 1.5, glass, 0, 1.12, 0.3);          // vitres
-  box(1.52, 0.06, 1.7, white, 0, 1.37, 0.28);         // toit (bande blanche)
-  box(0.42, 0.52, 4.05, white, 0, 0.64, 0).scale.set(1, 1.01, 1);  // bande centrale
-  box(1.7, 0.08, 0.5, dark, 0, 1.42, 1.95);           // aileron
-  box(0.08, 0.36, 0.4, dark, -0.7, 1.22, 1.95); box(0.08, 0.36, 0.4, dark, 0.7, 1.22, 1.95);
-  const lamp = new THREE.MeshBasicMaterial({ color: 0xfff6d8 });
-  box(0.32, 0.16, 0.06, lamp, -0.6, 0.72, -2.02); box(0.32, 0.16, 0.06, lamp, 0.6, 0.72, -2.02);
-  box(0.26, 0.2, 0.1, lamp, -0.3, 0.72, -2.04); box(0.26, 0.2, 0.1, lamp, 0.3, 0.72, -2.04);   // phares additionnels
-  const red = new THREE.MeshBasicMaterial({ color: 0xc81a10 });
-  box(0.36, 0.14, 0.06, red, -0.62, 0.74, 2.02); box(0.36, 0.14, 0.06, red, 0.62, 0.74, 2.02);
-  // numéro sur les portières
-  const nt = numberTexture('7', '#ffffff', 'rgba(0,0,0,.35)');
-  for (const sx of [-1, 1]) {
-    const d = new THREE.Mesh(new THREE.PlaneGeometry(0.75, 0.42), new THREE.MeshBasicMaterial({ map: nt, transparent: true }));
-    d.position.set(sx * 0.925, 0.68, 0.1); d.rotation.y = sx * Math.PI / 2; body.add(d);
+  const headMat = new THREE.MeshBasicMaterial({ color: 0xd8d2bc });
+  const brakeMat = new THREE.MeshBasicMaterial({ color: 0x6a0e0a });
+  const box = (w, h, l, m, x, y, z, par) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), m); o.position.set(x, y, z); o.castShadow = true; (par || body).add(o); return o; };
+  const nt = numberTexture(spec.num, '#ffffff', 'rgba(0,0,0,.35)');
+  const decal = (x, y, z, w, h) => { for (const sx of [-1, 1]) { const d = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: nt, transparent: true })); d.position.set(sx * x, y, z); d.rotation.y = sx * Math.PI / 2; body.add(d); } };
+  if (style === 0) {                     // voiture de rallye (compacte, aileron, phares additionnels)
+    box(1.82, 0.5, 4.0, paint, 0, 0.62, 0); box(1.84, 0.2, 4.04, dark, 0, 0.42, 0);
+    box(1.74, 0.12, 1.3, paint, 0, 0.92, -1.25).rotation.x = -0.08;
+    box(1.5, 0.5, 1.9, paint, 0, 1.1, 0.25);
+    box(1.44, 0.42, 0.08, glass, 0, 1.08, -0.72).rotation.x = 0.55;
+    box(1.52, 0.36, 1.5, glass, 0, 1.12, 0.3); box(1.52, 0.06, 1.7, white, 0, 1.37, 0.28);
+    box(0.42, 0.52, 4.05, white, 0, 0.64, 0);
+    box(1.7, 0.08, 0.5, dark, 0, 1.42, 1.95); box(0.08, 0.36, 0.4, dark, -0.7, 1.22, 1.95); box(0.08, 0.36, 0.4, dark, 0.7, 1.22, 1.95);
+    box(0.32, 0.16, 0.06, headMat, -0.6, 0.72, -2.02); box(0.32, 0.16, 0.06, headMat, 0.6, 0.72, -2.02);
+    box(0.26, 0.2, 0.1, headMat, -0.3, 0.72, -2.04); box(0.26, 0.2, 0.1, headMat, 0.3, 0.72, -2.04);
+    box(0.36, 0.14, 0.06, brakeMat, -0.62, 0.74, 2.02); box(0.36, 0.14, 0.06, brakeMat, 0.62, 0.74, 2.02);
+    decal(0.925, 0.68, 0.1, 0.75, 0.42);
+  } else if (style === 1) {              // sportive : basse, longue, capot plongeant, gros aileron
+    box(1.96, 0.42, 4.5, paint, 0, 0.5, 0); box(1.98, 0.14, 4.52, dark, 0, 0.3, 0);
+    box(1.9, 0.14, 1.6, paint, 0, 0.72, -1.35).rotation.x = -0.1;
+    box(1.6, 0.4, 1.7, paint, 0, 0.88, 0.45);
+    box(1.52, 0.4, 0.08, glass, 0, 0.86, -0.45).rotation.x = 0.95;
+    box(1.62, 0.3, 1.3, glass, 0, 0.9, 0.5); box(1.5, 0.06, 1.2, paint, 0, 1.08, 0.55);
+    box(1.5, 0.3, 0.08, glass, 0, 0.86, 1.33).rotation.x = -0.9;
+    box(0.36, 0.44, 4.55, white, -0.42, 0.52, 0); box(0.36, 0.44, 4.55, white, 0.42, 0.52, 0);
+    box(1.9, 0.07, 0.42, dark, 0, 1.15, 2.05); box(0.08, 0.4, 0.3, dark, -0.6, 0.95, 2.05); box(0.08, 0.4, 0.3, dark, 0.6, 0.95, 2.05);
+    box(0.5, 0.1, 0.06, headMat, -0.62, 0.62, -2.26); box(0.5, 0.1, 0.06, headMat, 0.62, 0.62, -2.26);
+    box(1.6, 0.1, 0.06, brakeMat, 0, 0.64, 2.26);
+    box(0.14, 0.14, 0.2, chrome, -0.35, 0.34, 2.28); box(0.14, 0.14, 0.2, chrome, 0.35, 0.34, 2.28);   // échappements
+    decal(0.985, 0.55, 0.15, 0.7, 0.38);
+  } else {                               // buggy 4x4 : châssis haut, arceaux, gros pneus
+    box(1.7, 0.45, 3.4, paint, 0, 1.0, 0); box(1.76, 0.18, 3.5, dark, 0, 0.74, 0);
+    box(1.6, 0.18, 1.0, paint, 0, 1.26, -1.15).rotation.x = -0.12;
+    box(1.5, 0.14, 0.9, dark, 0, 1.3, 1.25);
+    const bar = (w, h, l, x, y, z, rx) => { const o = box(w, h, l, dark, x, y, z); if (rx) o.rotation.x = rx; return o; };
+    for (const sx of [-0.68, 0.68]) { bar(0.09, 1.0, 0.09, sx, 1.7, 0.75); bar(0.09, 1.05, 0.09, sx, 1.68, -0.42, 0.35); bar(0.09, 0.09, 1.2, sx, 2.18, 0.18); }
+    bar(1.45, 0.09, 0.09, 0, 2.18, 0.75); bar(1.45, 0.09, 0.09, 0, 2.18, -0.4);
+    box(1.3, 0.5, 0.06, glass, 0, 1.55, -0.62).rotation.x = 0.35;
+    box(0.5, 0.45, 0.5, dark, -0.32, 1.42, 0.25); box(0.5, 0.45, 0.5, dark, 0.32, 1.42, 0.25);   // sièges
+    box(1.2, 0.14, 0.2, dark, 0, 2.3, -0.4);                                                  // rampe de phares
+    for (const x of [-0.42, -0.14, 0.14, 0.42]) box(0.18, 0.18, 0.08, headMat, x, 2.3, -0.52);
+    box(0.3, 0.16, 0.06, headMat, -0.6, 1.02, -1.72); box(0.3, 0.16, 0.06, headMat, 0.6, 1.02, -1.72);
+    box(0.3, 0.14, 0.06, brakeMat, -0.62, 1.02, 1.72); box(0.3, 0.14, 0.06, brakeMat, 0.62, 1.02, 1.72);
+    box(1.9, 0.16, 0.16, chrome, 0, 0.82, -1.85);                                             // pare-buffle
+    const spare = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.26, 14), dark); spare.rotation.x = Math.PI / 2; spare.position.set(0, 1.5, 1.82); body.add(spare);
+    decal(0.86, 1.0, 0.0, 0.7, 0.38);
   }
   g.add(body);
-  // roues
   const tire = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 });
-  const rim = new THREE.MeshStandardMaterial({ color: 0xd8dde2, roughness: 0.3, metalness: 0.7 });
-  const wheels = [];
-  for (const [x, z, front] of [[-0.86, -1.3, true], [0.86, -1.3, true], [-0.86, 1.3, false], [0.86, 1.3, false]]) {
-    const piv = new THREE.Group(); piv.position.set(x, 0.34, z);
+  const rim = style === 1 ? chrome : new THREE.MeshStandardMaterial({ color: style === 2 ? 0x30343a : 0xd8dde2, roughness: 0.3, metalness: 0.7 });
+  const wheels = [], wr = spec.wr, tw = style === 2 ? 0.34 : 0.26;
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+    const piv = new THREE.Group(); piv.position.set(sx * spec.tw, wr, sz * spec.wb);
     const w = new THREE.Group();
-    const t = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.26, 16), tire); t.rotation.z = Math.PI / 2; t.castShadow = true; w.add(t);
-    const r = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.27, 6), rim); r.rotation.z = Math.PI / 2; w.add(r);
+    const t = new THREE.Mesh(new THREE.CylinderGeometry(wr, wr, tw, 18), tire); t.rotation.z = Math.PI / 2; t.castShadow = true; w.add(t);
+    const r = new THREE.Mesh(new THREE.CylinderGeometry(wr * 0.6, wr * 0.6, tw + 0.01, style === 1 ? 10 : 6), rim); r.rotation.z = Math.PI / 2; w.add(r);
     piv.add(w); g.add(piv);
-    wheels.push({ piv, w, front });
+    wheels.push({ piv, w, front: sz < 0, x: sx * spec.tw, z: sz * spec.wb, y0: wr });
   }
-  g.userData = { body, wheels };
+  g.userData = { body, wheels, headMat, brakeMat };
   g.visible = false;
   scene.add(g);
   return g;
-})();
+}
+const carMeshes = CARS.map((c, i) => buildCar(c, i));
+let rallyCar = carMeshes[carIdx];
+// phares de nuit (un seul projecteur, posé sur la voiture active)
+const carSpot = new THREE.SpotLight(0xfff1d0, 0, 140, 0.55, 0.5, 1.2);
+scene.add(carSpot); scene.add(carSpot.target);
+function selectCar(i) {
+  carIdx = clamp(i, 0, CARS.length - 1);
+  const vis = rallyCar.visible;
+  rallyCar.visible = false;
+  rallyCar = carMeshes[carIdx];
+  rallyCar.visible = vis;
+  try { localStorage.setItem(CAR_KEY, String(carIdx)); } catch (e) {}
+}
 
 // --- poussière derrière les roues
 const rallyDust = { list: [], group: new THREE.Group() };
 scene.add(rallyDust.group);
-function rallyDustPuff(x, y, z, big) {
-  const mat = new THREE.SpriteMaterial({ map: groundFx.tex, transparent: true, depthWrite: false, opacity: 0.4, color: 0xc4ab82, fog: true });
+function rallyDustPuff(x, y, z, big, color) {
+  const mat = new THREE.SpriteMaterial({ map: groundFx.tex, transparent: true, depthWrite: false, opacity: 0.4, color: color || 0xc4ab82, fog: true });
   const s = new THREE.Sprite(mat); const sc = big ? 2.4 : 1.4;
   s.position.set(x, y + 0.4, z); s.scale.set(sc, sc, 1);
   rallyDust.group.add(s); rallyDust.list.push({ s, t: 0, life: 1.1 + Math.random() * 0.8, grow: big ? 5 : 3.2 });
@@ -3389,53 +3662,193 @@ function rallyFx(dt) {
   }
   if (!rally.on || rally.air) return;
   const v = Math.abs(rally.vf), slide = Math.abs(rally.vr || 0);
+  const surf = rally.surf | 0;
+  if (surf === 0 && slide < 3.5 && !(rally.brake > 0 && v > 18 && slide > 1.5)) return;   // goudron : fumée seulement en glisse
   if (v < 5 && slide < 3) return;
-  rally.dustT += dt * (v * 0.5 + slide * 2.5) * (rally.onRoad ? 1 : 0.6);
+  rally.dustT += dt * (surf === 0 ? slide * 3 : (v * 0.5 + slide * 2.5) * (surf === 1 ? 1 : 0.5));
+  const dcol = surf === 0 ? 0xdedede : surf === 1 ? 0xc4ab82 : 0x9c9474;
   const fx = -Math.sin(rally.yaw), fz = -Math.cos(rally.yaw), rx = Math.cos(rally.yaw), rz = -Math.sin(rally.yaw);
   while (rally.dustT > 1) {
     rally.dustT -= 1;
     const sd = Math.random() < 0.5 ? -1 : 1;
-    rallyDustPuff(pos.x - fx * 1.9 + rx * 0.8 * sd, pos.y, pos.z - fz * 1.9 + rz * 0.8 * sd, slide > 4);
+    rallyDustPuff(pos.x - fx * 1.9 + rx * 0.8 * sd, pos.y, pos.z - fz * 1.9 + rz * 0.8 * sd, slide > 4, dcol);
   }
 }
 function rallyClearDust() { for (const d of rallyDust.list) { rallyDust.group.remove(d.s); d.s.material.dispose(); } rallyDust.list.length = 0; }
 
-// --- placer la voiture sur la piste (indice d'échantillon), arrêtée
-function rallyPlace(i) {
-  i = ((i % RN) + RN) % RN;
-  const p = RALLY_P[i], q = RALLY_P[(i + 2) % RN];
-  const tx = q[0] - p[0], tz = q[1] - p[1];
+// --- placer la voiture (arrêtée) en (x, z), tournée vers (tx, tz)
+function carPlaceAt(x, z, tx, tz) {
   rally.yaw = Math.atan2(-tx, -tz);
-  pos.set(p[0], carGround(p[0], p[1]), p[1]);
+  pos.set(x, carGround(x, z), z);
   vel.set(0, 0, 0); omega.set(0, 0, 0);
   rally.vy = 0; rally.hg = pos.y; rally.air = false; rally.steer = 0; rally.pitch = 0; rally.roll = 0; rally.vf = 0; rally.vr = 0;
-  rally.idx = i;
   quat.setFromEuler(new THREE.Euler(0, rally.yaw, 0, 'YXZ'));
   prevPos.copy(pos); prevQuat.copy(quat); rPos.copy(pos); rQuat.copy(quat);
   camInit = false;
 }
-function rallyRespawn(msg) {
-  rallyPlace(rally.lastCp);
-  if (msg) toast(msg);
+function rallyPlace(i) {
+  i = ((i % RN) + RN) % RN;
+  const p = RALLY_P[i], q = RALLY_P[(i + 2) % RN];
+  carPlaceAt(p[0], p[1], q[0] - p[0], q[1] - p[1]);
+  rally.idx = i;
+}
+// sur une route : échantillon i, dans le sens de la route (dir = +1) ou à contresens
+function roadPlace(ri, i, dir) {
+  const R = ROADS[ri]; i = clamp(i, 0, R.n - 1);
+  const j = clamp(i + (dir < 0 ? -2 : 2), 0, R.n - 1);
+  let tx = R.X[j] - R.X[i], tz = R.Z[j] - R.Z[i]; if (j === i) { tx = 0; tz = -1; }
+  const side = R.kind ? 0 : (dir < 0 ? -2.6 : 2.6), tl = Math.hypot(tx, tz) || 1;   // on roule à droite
+  carPlaceAt(R.X[i] - tz / tl * side, R.Z[i] + tx / tl * side, tx, tz);
+}
+function nearestRoadPoint(x, z) {
+  let br = 0, bi = 0, bd = 1e18;
+  for (let r = 0; r < ROADS.length; r++) { const R = ROADS[r]; for (let i = 0; i < R.n; i += 3) { const d = (R.X[i] - x) ** 2 + (R.Z[i] - z) ** 2; if (d < bd) { bd = d; br = r; bi = i; } } }
+  return { r: br, i: bi };
+}
+function roadIdxNear(id, x, z) {
+  const R = ROADS.find(q => q.id === id); let bi = 0, bd = 1e18;
+  for (let i = 0; i < R.n; i++) { const d = (R.X[i] - x) ** 2 + (R.Z[i] - z) ** 2; if (d < bd) { bd = d; bi = i; } }
+  return bi;
+}
+const roadIndex = id => ROADS.findIndex(q => q.id === id);
+
+// --- lieux de livraison (sur les routes) et courses de vitesse
+const SPOTS = [
+  { name: 'Aéroport', road: 'A1', f: 0.01 }, { name: 'Port', road: 'A1', f: 0.985 },
+  { name: 'Centre-ville', road: 'A2', at: [11032, 6000] }, { name: 'Col de la montagne', road: 'A2', f: 0.99 },
+  { name: 'Belvédère du canyon', road: 'A3', f: 0.985 }, { name: 'Plage du sud', road: 'A4', f: 0.985 },
+  { name: 'Carrefour des pins', road: 'A4', f: 0.5 }, { name: 'Ferme des collines', road: 'D2', f: 0.45 },
+  { name: 'Cabane du rallye', road: 'D1', f: 0.97 }, { name: 'Refuge du canyon', road: 'D3', f: 0.5 },
+  { name: 'Station-service', road: 'A1', f: 0.45 }
+].map(S => {
+  const ri = roadIndex(S.road), R = ROADS[ri];
+  const i = S.at ? roadIdxNear(S.road, S.at[0], S.at[1]) : Math.round(S.f * (R.n - 1));
+  return { name: S.name, ri, i, x: R.X[i], z: R.Z[i] };
+});
+const GOODS = ['les pizzas', 'un colis', 'des fleurs', 'des médicaments', 'le courrier', 'un gâteau', 'des pièces auto', 'des glaces'];
+const SPRINTS = [
+  { name: 'Aéroport → Ville', road: 'A1', from: [500, 800], to: [9000, 5382] },
+  { name: 'Montée du col', road: 'A2', from: [11032, 6000], to: [13500, 600] },
+  { name: 'Route du sud', road: 'A4', from: [0, 1500], to: [0, 13750] },
+  { name: 'Chemin des collines', road: 'D2', from: [-2550, 4300], to: [9050, 7080] }
+].map(S => {
+  const ri = roadIndex(S.road), i0 = roadIdxNear(S.road, S.from[0], S.from[1]), i1 = roadIdxNear(S.road, S.to[0], S.to[1]);
+  return { name: S.name, ri, i0, i1, len: Math.abs(i1 - i0) * 4, key: 'Course auto · ' + S.name };
+});
+const DELIV_KEY = 'Livraisons · record';
+
+// portes (poteaux + banderole) : utilisées par les courses de vitesse
+const bannerTex = (txt, bg) => {
+  const c = document.createElement('canvas'); c.width = 512; c.height = 64;
+  const x = c.getContext('2d');
+  if (bg === 'check') { for (let i = 0; i < 32; i++) for (let j = 0; j < 4; j++) { x.fillStyle = (i + j) % 2 ? '#111' : '#fff'; x.fillRect(i * 16, j * 16, 16, 16); } x.fillStyle = 'rgba(0,0,0,.55)'; x.fillRect(110, 8, 292, 48); }
+  else { x.fillStyle = bg; x.fillRect(0, 0, 512, 64); }
+  x.fillStyle = '#fff'; x.font = 'bold 40px system-ui,sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillText(txt, 256, 34);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+};
+const carFx = { group: new THREE.Group(), gates: [], nextMat: new THREE.MeshBasicMaterial({ map: bannerTex('PORTE SUIVANTE', '#e0a020'), side: THREE.DoubleSide, fog: true }) };
+scene.add(carFx.group);
+const gatePostMat = new THREE.MeshLambertMaterial({ color: 0x30343a });
+function makeGate(x, z, tx, tz, half, label, bg, y0) {
+  const tl = Math.hypot(tx, tz) || 1, nx = -tz / tl, nz = tx / tl, g = new THREE.Group();
+  for (const sd of [-1, 1]) {
+    const px = x + nx * half * sd, pz = z + nz * half * sd, yb = carGround(px, pz);
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.45, 7.5, 0.45), gatePostMat);
+    post.position.set(px, yb + 3.4, pz); g.add(post);
+  }
+  const mat = new THREE.MeshBasicMaterial({ map: bannerTex(label, bg), side: THREE.DoubleSide, fog: true });
+  const banner = new THREE.Mesh(new THREE.PlaneGeometry(half * 2 + 0.4, 2.3), mat);
+  banner.position.set(x, y0 + 6.8, z); banner.rotation.y = Math.atan2(-tx, -tz);
+  g.add(banner); carFx.group.add(g);
+  return { banner, base: mat };
+}
+function carFxClear() {
+  for (const o of carFx.group.children) o.traverse(m => { if (m.material && m.material !== gatePostMat && m.material !== carFx.nextMat) { if (m.material.map) m.material.map.dispose(); m.material.dispose(); } if (m.geometry) m.geometry.dispose(); });
+  carFx.group.clear(); carFx.gates = []; carFx.marker = null;
+}
+// colonne lumineuse + colis flottant (livraisons)
+function makeMarker() {
+  const g = new THREE.Group();
+  const col = new THREE.Mesh(new THREE.CylinderGeometry(7, 7, 70, 24, 1, true), new THREE.MeshBasicMaterial({ color: 0xffd23a, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false, fog: true }));
+  col.position.y = 35; g.add(col);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(7, 0.35, 8, 40), new THREE.MeshBasicMaterial({ color: 0xffd23a }));
+  ring.rotation.x = Math.PI / 2; ring.position.y = 0.4; g.add(ring);
+  const pkg = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.2, 1.6), new THREE.MeshLambertMaterial({ color: 0xb98a52 }));
+  pkg.position.y = 3.5; g.add(pkg);
+  const tape = new THREE.Mesh(new THREE.BoxGeometry(1.62, 1.22, 0.25), new THREE.MeshLambertMaterial({ color: 0xe8d9a8 })); pkg.add(tape);
+  carFx.group.add(g);
+  return { g, col, ring, pkg };
 }
 
-const RALLY_HINT = 'Volant à gauche, pédales à droite (GAZ et FREIN)';
+const CAR_HINT = 'Volant à gauche, pédales à droite (GAZ et FREIN)';
 let hintSaved = null;
-function rallyStart() {
+// démarre un jeu en voiture : 'free' (balade), 'rally', 'sprint' (opt = n° de course), 'deliv'
+function carStart(mode, opt) {
   reset();
-  rally.on = true; rally.state = 'count'; rally.count = 3.6; rally.countShown = 99;
-  rally.t = 0; rally.next = 0; rally.lastCp = RN - 12;
-  rally.gas = rally.brake = 0; rally.wheel = 0; rally.kSteer = 0; rally.wheelTouch = null; rally.pedals.clear();
-  rallyPlace(RN - 12);
+  const R = rally;
+  R.on = true; R.mode = mode; R.opt = opt;
+  R.t = 0; R.next = 0; R.count = 3.6; R.countShown = 99;
+  R.gas = R.brake = 0; R.wheel = 0; R.kSteer = 0; R.wheelTouch = null; R.pedals.clear();
+  carFxClear();
+  if (mode === 'rally') {
+    R.state = 'count'; R.lastCp = RN - 12;
+    rallyPlace(RN - 12);
+  } else if (mode === 'sprint') {
+    const S = SPRINTS[opt], Rd = ROADS[S.ri], dir = S.i1 > S.i0 ? 1 : -1;
+    R.state = 'count';
+    const ng = Math.max(4, Math.round(S.len / 550));
+    R.gatesIdx = [];
+    for (let k = 1; k <= ng; k++) R.gatesIdx.push(Math.round(S.i0 + (S.i1 - S.i0) * k / ng));
+    R.gatesIdx.forEach((gi, k) => {
+      const j = clamp(gi + dir * 2, 0, Rd.n - 1), fin = k === ng - 1;
+      carFx.gates.push(makeGate(Rd.X[gi], Rd.Z[gi], Rd.X[j] - Rd.X[gi], Rd.Z[j] - Rd.Z[gi], Rd.hw + 2.5, fin ? 'ARRIVÉE' : 'PORTE ' + (k + 1), fin ? 'check' : '#2b7bd8', Rd.Y[gi]));
+    });
+    { const j = clamp(S.i0 + dir * 2, 0, Rd.n - 1); makeGate(Rd.X[S.i0], Rd.Z[S.i0], Rd.X[j] - Rd.X[S.i0], Rd.Z[j] - Rd.Z[S.i0], Rd.hw + 2.5, 'DÉPART', 'check', Rd.Y[S.i0]); }
+    R.lastGate = S.i0 - dir * 6; R.sdir = dir;
+    roadPlace(S.ri, S.i0 - dir * 6, dir);
+  } else if (mode === 'deliv') {
+    R.state = 'run'; R.delivered = 0;
+    roadPlace(SPOTS[0].ri, SPOTS[0].i + 8, 1);
+    carFx.marker = makeMarker();
+    delivNewJob(0);
+  } else {
+    R.state = 'free';
+    roadPlace(SPOTS[0].ri, SPOTS[0].i + 8, 1);
+  }
   rallyCar.visible = true; aircraft.visible = false;
   el('ah').style.display = 'none'; hudStall.classList.remove('on');
-  raceEl.classList.add('on');
+  raceEl.classList.toggle('on', mode !== 'free');
   el('brally').textContent = 'QUITTER';
   if (hintSaved === null) hintSaved = hintEl.textContent;
-  hintEl.textContent = RALLY_HINT; hintEl.classList.remove('off');
+  hintEl.textContent = CAR_HINT; hintEl.classList.remove('off');
   setTimeout(() => { if (rally.on) hintEl.classList.add('off'); }, 5000);
   rallyGatesUpdate();
   rallyHUD();
+  toast(mode === 'free' ? 'Balade libre · ' + CARS[carIdx].name : mode === 'rally' ? 'Rallye · ' + RALLY.name : mode === 'sprint' ? 'Course · ' + SPRINTS[opt].name : 'Livraisons');
+}
+function rallyStart() { carStart('rally'); }
+// livraisons : une nouvelle commande (aller chercher, puis livrer)
+function delivNewJob(fromSpot) {
+  const R = rally;
+  let a, b;
+  do { a = (Math.random() * SPOTS.length) | 0; } while (a === fromSpot && SPOTS.length > 1);
+  do { b = (Math.random() * SPOTS.length) | 0; } while (b === a);
+  R.job = { a, b, phase: 'pick', what: GOODS[(Math.random() * GOODS.length) | 0] };
+  R.jobT = delivTime(pos.x, pos.z, SPOTS[a]);
+  delivMarker();
+}
+function delivTime(x, z, S) {
+  const v = Math.min(CARS[carIdx].vmax[0], 55) * 0.48;           // vitesse moyenne visée
+  return Math.round(Math.hypot(S.x - x, S.z - z) * 1.3 / v * Math.pow(0.97, rally.delivered) + 20);
+}
+function delivMarker() {
+  const M = carFx.marker; if (!M) return;
+  const S = SPOTS[rally.job.phase === 'pick' ? rally.job.a : rally.job.b];
+  M.g.position.set(S.x, carGround(S.x, S.z), S.z);
+  const c = rally.job.phase === 'pick' ? 0xffd23a : 0x48e07a;
+  M.col.material.color.setHex(c); M.ring.material.color.setHex(c);
+  M.pkg.visible = rally.job.phase === 'pick';
 }
 function rallyStop() {
   if (!rally || !rally.on) return;
@@ -3443,28 +3856,69 @@ function rallyStop() {
   rallyCar.visible = false;
   el('ah').style.display = '';
   raceEl.classList.remove('on');
-  el('brally').textContent = 'RALLYE';
+  el('brally').textContent = 'VOITURE';
   if (hintSaved !== null) hintEl.textContent = hintSaved;
   rallyClearDust();
+  carFxClear();
+  carSpot.intensity = 0;
+  if (camera.fov !== 62) { camera.fov = 62; camera.updateProjectionMatrix(); }
   rally.wheelTouch = null; rally.pedals.clear();
 }
+function rallyRespawn(msg) {
+  const R = rally;
+  if (R.mode === 'rally') rallyPlace(R.lastCp);
+  else if (R.mode === 'sprint') roadPlace(SPRINTS[R.opt].ri, R.lastGate, R.sdir);
+  else { const n = nearestRoadPoint(pos.x, pos.z); const dir = Math.cos(R.yaw) * 0 + 1; roadPlace(n.r, n.i, dir); }
+  if (msg) toast(msg);
+}
 function rallyGatesUpdate() {
-  const nextCi = rally.state === 'done' ? -1 : rally.cps[rally.next];
-  for (const gt of rally.gates) gt.banner.material = (gt.ci === nextCi && !gt.isFinish) ? rally.nextMat : gt.base;
+  const R = rally;
+  if (R.mode === 'rally') {
+    const nextCi = R.state === 'done' ? -1 : R.cps[R.next];
+    for (const gt of R.gates) gt.banner.material = (gt.ci === nextCi && !gt.isFinish) ? R.nextMat : gt.base;
+  } else {
+    for (const gt of R.gates) gt.banner.material = gt.base;
+    carFx.gates.forEach((gt, k) => { gt.banner.material = (k === R.next && k < carFx.gates.length - 1 && R.state !== 'done') ? carFx.nextMat : gt.base; });
+  }
+}
+// point visé par la flèche (et la mini-carte)
+function carTarget() {
+  const R = rally;
+  if (R.mode === 'rally' && R.state !== 'done') { const p = RALLY_P[R.cps[R.next]]; return [p[0], p[1]]; }
+  if (R.mode === 'sprint' && R.state !== 'done') { const Rd = ROADS[SPRINTS[R.opt].ri], gi = R.gatesIdx[R.next]; return [Rd.X[gi], Rd.Z[gi]]; }
+  if (R.mode === 'deliv' && R.state !== 'done') { const S = SPOTS[R.job.phase === 'pick' ? R.job.a : R.job.b]; return [S.x, S.z]; }
+  return null;
 }
 function rallyHUD() {
-  rTime.textContent = fmtT(rally.t);
-  rInfo.textContent = rally.state === 'count' ? 'PRÊT ?' : rally.state === 'done' ? 'ARRIVÉE' :
-    (rally.next === rally.cps.length - 1 ? 'VERS L\'ARRIVÉE' : 'CONTRÔLE ' + (rally.next + 1) + '/' + (rally.cps.length - 1));
-  const best = records[RALLY_KEY];
-  rBest.innerHTML = 'RECORD<br>' + (best ? fmtT(best) : '—');
-  if (rally.state !== 'done') {
-    const p = RALLY_P[rally.cps[rally.next]];
-    const brg = Math.atan2(p[0] - pos.x, -(p[1] - pos.z));
-    const hdg = Math.atan2(-Math.sin(rally.yaw), Math.cos(rally.yaw));
+  const R = rally;
+  if (R.mode === 'free') return;
+  if (R.mode === 'deliv') {
+    rTime.textContent = R.state === 'done' ? 'FINI' : fmtT(Math.max(R.jobT, 0));
+    rTime.style.color = R.state !== 'done' && R.jobT < 10 ? '#ff6a50' : '';
+    const S = R.job ? SPOTS[R.job.phase === 'pick' ? R.job.a : R.job.b] : null;
+    rInfo.textContent = R.state === 'done' ? 'TEMPS ÉCOULÉ' : R.job.phase === 'pick' ? 'PRENDS ' + R.job.what.toUpperCase() + ' · ' + S.name : 'LIVRE · ' + S.name;
+    rBest.innerHTML = 'LIVRÉS ' + R.delivered + '<br>RECORD ' + (records[DELIV_KEY] || 0);
+  } else {
+    rTime.style.color = '';
+    rTime.textContent = fmtT(R.t);
+    const n = R.mode === 'rally' ? R.cps.length : R.gatesIdx.length;
+    rInfo.textContent = R.state === 'count' ? 'PRÊT ?' : R.state === 'done' ? 'ARRIVÉE' :
+      (R.next === n - 1 ? 'VERS L\'ARRIVÉE' : (R.mode === 'rally' ? 'CONTRÔLE ' : 'PORTE ') + (R.next + 1) + '/' + (n - 1));
+    const best = records[R.mode === 'rally' ? RALLY_KEY : SPRINTS[R.opt].key];
+    rBest.innerHTML = 'RECORD<br>' + (best ? fmtT(best) : '—');
+  }
+  const T = carTarget();
+  if (T) {
+    const brg = Math.atan2(T[0] - pos.x, -(T[1] - pos.z));
+    const hdg = Math.atan2(-Math.sin(R.yaw), Math.cos(R.yaw));
     let rel = brg - hdg; rel = Math.atan2(Math.sin(rel), Math.cos(rel));
     rArrow.style.transform = 'rotate(' + (rel * 57.2958).toFixed(1) + 'deg)';
   }
+}
+function saveRecord(key, t, lowerBetter) {
+  const best = records[key];
+  if (best == null || (lowerBetter ? t < best : t > best)) { records[key] = t; try { localStorage.setItem(RECORD_KEY, JSON.stringify(records)); } catch (e) {} return true; }
+  return false;
 }
 function beep(f, len, vol) {
   if (!audio || !audio.ctx || muted) return;
@@ -3473,18 +3927,20 @@ function beep(f, len, vol) {
 
 // --- physique de la voiture (pas fixe 1/120 s)
 const _re = new THREE.Euler(), _rob = new THREE.Vector3();
-const GEARS = [0, 12, 21, 30, 39, 48, 60];
+const GEAR_F = [0, 0.2, 0.35, 0.5, 0.65, 0.8, 1.02];
 function rallyStep(dt) {
   simT += dt;
   const R = rally;
   let fx = -Math.sin(R.yaw), fz = -Math.cos(R.yaw), rx = Math.cos(R.yaw), rz = -Math.sin(R.yaw);
   let vf = vel.x * fx + vel.z * fz;
+  const CAR = CARS[carIdx];
   const near = rallyNearest(pos.x, pos.z);
-  R.onRoad = near.d < 7.5;
+  const surf = carSurface(pos.x, pos.z);
+  R.surf = surf; R.onRoad = surf < 2;
   if (near.i >= 0) R.idx = near.i;
   const frozen = R.state === 'count';
   if (frozen) { R.count -= dt; if (R.count <= 0) { R.state = 'run'; R.t = 0; toast('PARTEZ !'); beep(1180, 0.35, 0.1); } }
-  else if (R.state === 'run') R.t += dt;
+  else if (R.state === 'run') { R.t += dt; if (R.mode === 'deliv') R.jobT -= dt; }
 
   // direction : moins de braquage à haute vitesse
   const sMax = 0.6 / (1 + Math.abs(vf) / 18);
@@ -3495,15 +3951,16 @@ function rallyStep(dt) {
   const hR = carGround(pos.x + rx * 0.9, pos.z + rz * 0.9), hL = carGround(pos.x - rx * 0.9, pos.z - rz * 0.9);
   const water = meshHeight(pos.x, pos.z) < -0.6;
   if (!R.air) {
-    const maxV = R.onRoad ? 50 : 33, roll = R.onRoad ? 0.03 : 0.22;
+    const maxV = CAR.vmax[surf], roll = CAR.roll[surf];
     const slope = (hF - hB) / 2.8;
     vf -= 9.81 * slope / Math.sqrt(1 + slope * slope) * dt;
     if (gasIn > 0) {
       if (vf < -0.5) vf += gasIn * 22 * dt;
-      else vf += gasIn * 12 * Math.max(0, 1 - vf / maxV) * dt;
+      else vf += gasIn * CAR.acc * Math.max(0, 1 - vf / maxV) * dt;
     }
+    if (vf > maxV + 1) vf -= (vf - maxV) * 0.9 * dt;          // trop vite pour ce terrain : on ralentit
     if (brkIn > 0) {
-      if (vf > 0.4) vf = Math.max(0, vf - brkIn * 21 * dt);
+      if (vf > 0.4) vf = Math.max(0, vf - brkIn * CAR.brake * dt);
       else if (frozen) vf *= Math.exp(-20 * dt);
       else vf = Math.max(-9, vf - brkIn * 6 * dt);
     }
@@ -3514,13 +3971,13 @@ function rallyStep(dt) {
     let vr = vel.x * rx + vel.z * rz;
     vel.x = fx * vf + rx * vr; vel.z = fz * vf + rz * vr;
     let yr = vf * Math.tan(R.steer) / 2.6;
-    const yMax = Math.min(1.7, (R.onRoad ? 12.5 : 9.5) / Math.max(Math.abs(vf), 1));   // adhérence max
+    const yMax = Math.min(1.7, CAR.ymax[surf] / Math.max(Math.abs(vf), 1));   // adhérence max
     yr = clamp(yr, -yMax, yMax);
     R.yawRate = yr;
     R.yaw -= yr * dt;
     fx = -Math.sin(R.yaw); fz = -Math.cos(R.yaw); rx = Math.cos(R.yaw); rz = -Math.sin(R.yaw);
     vf = vel.x * fx + vel.z * fz; vr = vel.x * rx + vel.z * rz;
-    vr *= Math.exp(-(R.onRoad ? 5.2 : 3.6) * dt);          // adhérence : la terre laisse glisser
+    vr *= Math.exp(-CAR.grip[surf] * dt);          // adhérence : la terre laisse glisser
     vel.x = fx * vf + rx * vr; vel.z = fz * vf + rz * vr;
     R.vr = vr;
   } else {
@@ -3568,9 +4025,10 @@ function rallyStep(dt) {
 
   // régime moteur (boîte automatique)
   const v = Math.abs(vf);
-  let gi = 1; while (gi < GEARS.length - 1 && v > GEARS[gi]) gi++;
+  const vtop = CAR.vmax[0];
+  let gi = 1; while (gi < GEAR_F.length - 1 && v > GEAR_F[gi] * vtop) gi++;
   R.gear = vf < -0.5 ? -1 : gi;
-  const lo = GEARS[gi - 1], hi = GEARS[gi];
+  const lo = GEAR_F[gi - 1] * vtop, hi = GEAR_F[gi] * vtop;
   const rpm = clamp((v - lo) / (hi - lo), 0, 1);
   const want = R.air ? 0.95 : (frozen ? 0.25 + 0.7 * R.gas : 0.18 + 0.75 * (gasIn > 0 ? Math.max(rpm, 0.35) : rpm * 0.6));
   R.rpm += (want - R.rpm) * Math.min(1, dt * 8);
@@ -3581,18 +4039,47 @@ function rallyStep(dt) {
   else R.waterT = 0;
 
   // contrôles de passage
-  if (R.state === 'run' && near.i >= 0) {
+  if (R.mode === 'rally' && R.state === 'run' && near.i >= 0) {
     const ci = R.cps[R.next];
     if (((R.idx - ci + RN) % RN) < 30 && near.d < 20) {
       R.lastCp = ci; R.next++;
       if (R.next >= R.cps.length) {
         R.state = 'done';
-        const best = records[RALLY_KEY];
-        if (!best || R.t < best) { records[RALLY_KEY] = R.t; try { localStorage.setItem(RECORD_KEY, JSON.stringify(records)); } catch (e) {} toast('Nouveau record ! ' + fmtT(R.t)); }
-        else toast('Arrivée : ' + fmtT(R.t));
+        if (saveRecord(RALLY_KEY, R.t, true)) toast('Nouveau record ! ' + fmtT(R.t)); else toast('Arrivée : ' + fmtT(R.t));
         beep(660, 0.15); setTimeout(() => beep(990, 0.3), 160);
       } else { beep(880, 0.12); }
       rallyGatesUpdate();
+    }
+  } else if (R.mode === 'sprint' && R.state === 'run') {
+    const S = SPRINTS[R.opt], Rd = ROADS[S.ri], gi = R.gatesIdx[R.next];
+    if (Math.hypot(pos.x - Rd.X[gi], pos.z - Rd.Z[gi]) < Rd.hw + 12) {
+      R.lastGate = gi; R.next++;
+      if (R.next >= R.gatesIdx.length) {
+        R.state = 'done';
+        if (saveRecord(S.key, R.t, true)) toast('Nouveau record ! ' + fmtT(R.t)); else toast('Arrivée : ' + fmtT(R.t));
+        beep(660, 0.15); setTimeout(() => beep(990, 0.3), 160);
+      } else beep(880, 0.12);
+      rallyGatesUpdate();
+    }
+  } else if (R.mode === 'deliv' && R.state === 'run') {
+    const J = R.job, Sp = SPOTS[J.phase === 'pick' ? J.a : J.b];
+    if (Math.hypot(pos.x - Sp.x, pos.z - Sp.z) < 9) {
+      if (J.phase === 'pick') {
+        J.phase = 'drop'; R.jobT = delivTime(pos.x, pos.z, SPOTS[J.b]);
+        toast('Chargé ! Livre ' + J.what + ' : ' + SPOTS[J.b].name); beep(880, 0.12);
+      } else {
+        R.delivered++;
+        const bonus = Math.max(0, Math.round(R.jobT));
+        toast('Livré ! (' + bonus + ' s d\'avance)'); beep(660, 0.15); setTimeout(() => beep(990, 0.25), 160);
+        saveRecord(DELIV_KEY, R.delivered, false);
+        delivNewJob(J.b);
+      }
+      delivMarker();
+    } else if (R.jobT <= 0) {
+      R.state = 'done';
+      const rec = saveRecord(DELIV_KEY, R.delivered, false);
+      toast('Temps écoulé ! ' + R.delivered + ' livraison' + (R.delivered > 1 ? 's' : '') + (rec && R.delivered ? ' · record !' : ''));
+      beep(300, 0.4);
     }
   }
 }
@@ -3617,10 +4104,32 @@ function rallyFrame(dt, kb) {
   C.position.copy(rPos); C.quaternion.copy(rQuat);
   u.body.rotation.set(R.bodyPitch, 0, R.bodyRoll);
   u.body.position.y = R.air ? 0.06 : 0;
-  for (const w of u.wheels) { w.w.rotation.x = -R.spin; if (w.front) w.piv.rotation.y = -R.steer; }
+  const CAR = CARS[carIdx];
+  C.updateMatrixWorld();
+  for (const w of u.wheels) {
+    w.w.rotation.x = -R.spin; if (w.front) w.piv.rotation.y = -R.steer;
+    // suspension : chaque roue cherche le sol sous elle
+    _sv.set(w.x, 0, w.z).applyMatrix4(C.matrixWorld);
+    const dy = R.air ? -CAR.susp : clamp(carGround(_sv.x, _sv.z) - _sv.y, -CAR.susp, CAR.susp);
+    w.piv.position.y += (w.y0 + dy - w.piv.position.y) * Math.min(1, dt * 18);
+  }
+  // feux stop, phares la nuit
+  u.brakeMat.color.setHex(R.brake > 0 && Math.abs(R.vf) > 0.3 ? 0xff2a1a : (isNight ? 0x9a1810 : 0x6a0e0a));
+  u.headMat.color.setHex(isNight ? 0xfff6dc : 0xd8d2bc);
+  if (isNight) {
+    carSpot.intensity = 60;
+    _sv.set(0, 1.2, -1.8).applyMatrix4(C.matrixWorld); carSpot.position.copy(_sv);
+    _sv.set(0, -1.5, -30).applyMatrix4(C.matrixWorld); carSpot.target.position.copy(_sv);
+  } else carSpot.intensity = 0;
+  // champ de vision qui s'élargit avec la vitesse
+  const fov = 62 + Math.min(Math.abs(R.vf) * 0.16, 12);
+  if (Math.abs(camera.fov - fov) > 0.05) { camera.fov += (fov - camera.fov) * Math.min(1, dt * 3); camera.updateProjectionMatrix(); }
+  // colonne de livraison
+  if (carFx.marker) { carFx.marker.pkg.rotation.y += dt * 1.6; carFx.marker.pkg.position.y = 3.5 + Math.sin(simT * 2.5) * 0.4; }
   rallyFx(dt);
   rallyHUD();
 }
+const _sv = new THREE.Vector3();
 
 // --- commandes tactiles : volant (gauche), pédales (droite)
 function rallyLayout() {
@@ -3685,9 +4194,9 @@ function drawRallyControls() {
   c.lineWidth = 10; c.strokeStyle = 'rgba(40,44,50,.95)';
   c.beginPath(); c.moveTo(-r + 10, 0); c.lineTo(r - 10, 0); c.moveTo(0, 0); c.lineTo(0, r - 10); c.stroke();
   c.fillStyle = '#e0a020'; c.fillRect(-5, -r - 1, 10, 16);             // repère du haut
-  c.beginPath(); c.arc(0, 0, r * 0.26, 0, 6.2832); c.fillStyle = '#1f5fbf'; c.fill();
+  c.beginPath(); c.arc(0, 0, r * 0.26, 0, 6.2832); c.fillStyle = CARS[carIdx].color; c.fill();
   c.strokeStyle = 'rgba(255,255,255,.6)'; c.lineWidth = 2; c.stroke();
-  c.fillStyle = '#fff'; c.font = 'bold 15px system-ui,sans-serif'; c.fillText('7', 0, 1);
+  c.fillStyle = '#fff'; c.font = 'bold 15px system-ui,sans-serif'; c.fillText(CARS[carIdx].num, 0, 1);
   c.restore();
   c.fillStyle = 'rgba(210,232,248,.55)'; c.font = '10px ui-monospace,monospace';
   c.fillText('VOLANT', x, y + r + 28);
@@ -3719,14 +4228,41 @@ function drawRallyControls() {
 el('brally').addEventListener('click', e => {
   e.stopPropagation(); initAudio();
   if (rally.on) { reset(); toast('Retour à l\'avion'); }
-  else rallyStart();
+  else openCarMenu();
 });
-window.__rally = () => ({ on: rally.on, state: rally.state, t: +rally.t.toFixed(1), next: rally.next, ncp: rally.cps.length, idx: rally.idx, kmh: Math.round(Math.abs(rally.vf) * 3.6), air: rally.air, road: rally.onRoad, pos: pos.toArray().map(v => +v.toFixed(2)), gas: rally.gas, steer: +rally.steer.toFixed(2) });
+// --- menu VOITURE : choix de la voiture puis du jeu
+function openCarMenu() {
+  const m = el('vmenu'), g = el('vgrid'), cg = el('vcars');
+  cg.innerHTML = ''; g.innerHTML = '';
+  CARS.forEach((c, i) => {
+    const b = document.createElement('button'); b.className = 'pi car' + (i === carIdx ? ' sel' : '');
+    b.innerHTML = '<i style="background:' + c.color + '"></i>' + c.name + '<small>' + c.desc + ' · ' + Math.round(c.vmax[0] * 3.6) + ' km/h</small>';
+    b.addEventListener('click', ev => { ev.stopPropagation(); selectCar(i); openCarMenu(); });
+    cg.appendChild(b);
+  });
+  const item = (label, sub, fn) => { const b = document.createElement('button'); b.className = 'pi'; b.innerHTML = label + '<small>' + sub + '</small>'; b.addEventListener('click', ev => { ev.stopPropagation(); m.classList.remove('on'); fn(); }); g.appendChild(b); };
+  item('Balade libre', 'Roule où tu veux : routes, chemins, ville', () => carStart('free'));
+  item('Livraisons', 'Va chercher, puis livre avant la fin du temps · record ' + (records[DELIV_KEY] || 0), () => carStart('deliv'));
+  item('Rallye · ' + RALLY.name, 'Spéciale en terre · record ' + (records[RALLY_KEY] ? fmtT(records[RALLY_KEY]) : '—'), () => carStart('rally'));
+  SPRINTS.forEach((S, i) => item('Course · ' + S.name, (ROADS[S.ri].kind ? 'Terre' : 'Goudron') + ' · ' + (S.len / 1000).toFixed(1) + ' km · record ' + (records[S.key] ? fmtT(records[S.key]) : '—'), () => carStart('sprint', i)));
+  m.classList.add('on');
+}
+el('vmenu').addEventListener('click', e => { if (e.target.id === 'vmenu') el('vmenu').classList.remove('on'); });
+window.__rally = () => ({ on: rally.on, state: rally.state, t: +rally.t.toFixed(1), next: rally.next, cp: rally.cps[rally.next], ncp: rally.cps.length, idx: rally.idx, kmh: Math.round(Math.abs(rally.vf) * 3.6), air: rally.air, road: rally.onRoad, pos: pos.toArray().map(v => +v.toFixed(2)), gas: rally.gas, steer: +rally.steer.toFixed(2) });
 window.__rallyStart = () => rallyStart();
 window.__rallyGo = () => { rally.count = 0.01; };
 window.__rallyInput = (o) => { if ('gas' in o) { rally.pedals.delete('t1'); if (o.gas) rally.pedals.set('t1', 'gas'); } if ('brake' in o) { rally.pedals.delete('t2'); if (o.brake) rally.pedals.set('t2', 'brake'); } if ('wheel' in o) { rally.wheel = o.wheel; rally.wheelTouch = o.wheel ? { id: 'test', a0: 0, w0: o.wheel, x0: 0, last: 0, acc: 0 } : null; } };
 window.__rallyPlace = (i) => rallyPlace(i);
+window.__car = (mode, opt) => carStart(mode, opt);
+window.__carSel = (i) => selectCar(i);
+window.__carInfo = () => ({ mode: rally.mode, state: rally.state, surf: rally.surf, car: CARS[carIdx].name, kmh: Math.round(Math.abs(rally.vf) * 3.6), next: rally.next, t: +rally.t.toFixed(1), job: rally.job, jobT: +rally.jobT.toFixed(1), delivered: rally.delivered, pos: pos.toArray().map(v => +v.toFixed(1)), y: +pos.y.toFixed(2) });
+window.__roads = () => ROADS.map(R => ({ id: R.id, n: R.n, len: Math.round(R.len) }));
+window.__spots = () => SPOTS.map(S => ({ name: S.name, x: Math.round(S.x), z: Math.round(S.z) }));
+window.__carTp = (x, z, tx, tz) => carPlaceAt(x, z, tx, tz);
+window.__roadPt = (id, i) => { const R = ROADS.find(q => q.id === id); return [R.X[i], R.Z[i], R.Y[i]]; };
 window.__mesh = (x, z) => meshHeight(x, z);
+window.__th = (x, z) => terrainHeight(x, z);
+window.__hitOb = (x, y, z) => !!hitObstacle(new THREE.Vector3(x, y, z), 1.4);
 
 window.__race = () => ({ idx: race.idx, next: race.next, t: race.t, n: race.rings.length, done: race.done, pos: pos.toArray().map(v => Math.round(v)), ring: race.rings[race.next] ? race.rings[race.next].c.toArray().map(v => Math.round(v)) : null });
 window.__setState = (s) => {
