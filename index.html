@@ -627,6 +627,14 @@ for (let ri = 1; ri < ROADS.length; ri++) {
     for (let k = -PL; k <= PL; k++) { const i = q.i + k; if (i < 0 || i >= R.n) continue; const w = 1 - Math.abs(k) / PL, v = q.dy * w * w * (3 - 2 * w); if (Math.abs(v) > Math.abs(add[i])) add[i] = v; } }
   for (let i = 0; i < R.n; i++) if (!R.nt[i]) R.Y[i] += add[i];
 }
+// esplanades aplanies pour les grands décors (festival)
+const FLATS = [];
+function flatsApply(h, x, z) {
+  for (const F of FLATS) { const d = Math.hypot(x - F.x, z - F.z); if (d < F.r + F.ramp) h = lerp(h, F.y, 1 - smoothstep(F.r, F.r + F.ramp, d)); }
+  return h;
+}
+{ const R = ROADS.find(q => q.id === 'RP3'); if (R) FLATS.push({ x: R.ring[0] + 260, z: R.ring[1] - 120, r: 150, ramp: 130, y: R.Y[0] - 1 }); }
+const tbF = (x, z) => flatsApply(terrainBase(x, z), x, z);
 // viaducs : là où la route passerait à plus de 7 m au-dessus d'un creux, un pont sur piliers remplace le remblai
 for (const R of ROADS) {
   R.via = new Uint8Array(R.n);
@@ -636,7 +644,7 @@ for (const R of ROADS) {
     if (R.nt[i]) { fill[i] = 0; continue; }
     const a = Math.max(i - 1, 0), b = Math.min(i + 1, R.n - 1), tx = R.X[b] - R.X[a], tz = R.Z[b] - R.Z[a], tl = Math.hypot(tx, tz) || 1;
     const nx = -tz / tl * R.hw, nz = tx / tl * R.hw;
-    fill[i] = R.Y[i] - Math.max(terrainBase(R.X[i], R.Z[i]), terrainBase(R.X[i] + nx, R.Z[i] + nz), terrainBase(R.X[i] - nx, R.Z[i] - nz), -1);
+    fill[i] = R.Y[i] - Math.max(tbF(R.X[i], R.Z[i]), tbF(R.X[i] + nx, R.Z[i] + nz), tbF(R.X[i] - nx, R.Z[i] - nz), -1);
   }
   const otherNear = (i) => {
     const cx = Math.floor(R.X[i] / RD_CELL), cz = Math.floor(R.Z[i] / RD_CELL);
@@ -644,19 +652,29 @@ for (const R of ROADS) {
       for (const k of L) { const Q = ROADS[(k / 1e6) | 0]; if (Q === R) continue; const j = k % 1e6; if ((Q.X[j] - R.X[i]) ** 2 + (Q.Z[j] - R.Z[i]) ** 2 < 28 * 28) return true; } }
     return false;
   };
+  // marque [a,b] en évitant les abords des autres routes (croisements, raccords) : on garde les morceaux assez longs
+  const markSub = (a, b, minLen, arr) => {
+    const bad = new Uint8Array(b - a + 1);
+    for (let k = a; k <= b; k++) if (otherNear(k)) for (let m = Math.max(a, k - 5); m <= Math.min(b, k + 5); m++) bad[m - a] = 1;
+    let s0 = -1;
+    for (let k = a; k <= b + 1; k++) {
+      const free = k <= b && !bad[k - a];
+      if (free && s0 < 0) s0 = k;
+      else if (!free && s0 >= 0) { if (k - 1 - s0 >= minLen) for (let m = s0; m < k; m++) { arr[m] = 1; R.nt[m] = 1; } s0 = -1; }
+    }
+  };
   for (let i = 12; i < R.n - 12; i++) {
     if (fill[i] < 7 || R.via[i]) continue;
     let a = i, b = i;
     while (a > 8 && fill[a - 1] > 2.2 && !R.nt[a - 1]) a--;
     while (b < R.n - 9 && fill[b + 1] > 2.2 && !R.nt[b + 1]) b++;
     if (b - a < 6) { i = b; continue; }
-    let ok = true; for (let k = a; k <= b; k++) if (otherNear(k)) { ok = false; break; }
-    if (ok) for (let k = a; k <= b; k++) { R.via[k] = 1; R.nt[k] = 1; }
+    markSub(a, b, 6, R.via);
     i = b;
   }
   // tranchées très profondes : la route passe en tunnel sous la colline
   const cut = new Float32Array(R.n);
-  for (let i = 0; i < R.n; i++) cut[i] = R.nt[i] ? 0 : terrainBase(R.X[i], R.Z[i]) - R.Y[i];
+  for (let i = 0; i < R.n; i++) cut[i] = R.nt[i] ? 0 : tbF(R.X[i], R.Z[i]) - R.Y[i];
   for (let i = 20; i < R.n - 20; i++) {
     if (cut[i] < 24) continue;
     let a = i, b = i;
@@ -664,7 +682,7 @@ for (const R of ROADS) {
     while (b < R.n - 11 && cut[b + 1] > 15 && !R.nt[b + 1]) b++;
     let top = 0; for (let k = a; k <= b; k++) top = Math.max(top, cut[k]);
     if (b - a < 12 || top < 24) { i = b; continue; }
-    let ok = true; for (let k = a; k <= b; k++) if (otherNear(k)) { ok = false; break; }
+    let ok = true; for (let k = a; k <= b; k++) if (otherNear(k)) { ok = false; break; }   // pas de tunnel coupé par un carrefour : on garde une tranchée ouverte
     if (ok) for (let k = a; k <= b; k++) { R.tun[k] = 1; R.nt[k] = 1; }
     i = b;
   }
@@ -766,13 +784,6 @@ function coarseCarve(x, z, y) {
   }
   return out;
 }
-// esplanades aplanies pour les grands décors (festival)
-const FLATS = [];
-function flatsApply(h, x, z) {
-  for (const F of FLATS) { const d = Math.hypot(x - F.x, z - F.z); if (d < F.r + F.ramp) h = lerp(h, F.y, 1 - smoothstep(F.r, F.r + F.ramp, d)); }
-  return h;
-}
-{ const R = ROADS.find(q => q.id === 'RP3'); if (R) FLATS.push({ x: R.ring[0] + 260, z: R.ring[1] - 120, r: 150, ramp: 130, y: R.Y[0] - 1 }); }
 
 // carrefours : pour chaque route, les points où l'on peut passer sur une autre (croisements, T, ronds-points, bouts de route)
 const JUNC = ROADS.map(() => []);
@@ -5956,7 +5967,7 @@ window.__rallyStart = () => rallyStart();
 window.__rallyGo = () => { rally.count = 0.01; };
 window.__rallyInput = (o) => { if ('gas' in o) { rally.pedals.delete('t1'); if (o.gas) rally.pedals.set('t1', 'gas'); } if ('brake' in o) { rally.pedals.delete('t2'); if (o.brake) rally.pedals.set('t2', 'brake'); } if ('wheel' in o) { rally.wheel = o.wheel; rally.wheelTouch = o.wheel ? { id: 'test', a0: 0, w0: o.wheel, x0: 0, last: 0, acc: 0 } : null; } };
 window.__rallyPlace = (i) => rallyPlace(i);
-window.__carSim = (ri, i0, n, spd) => {
+window.__carSim = (ri, i0, n, spd, nitro) => {
   const Rd = ROADS[ri]; roadPlace(ri, i0, 1); rally.state = 'free';
   let ci = i0, air = 0, was = false, maxVy = 0, airT = 0; const at = [];
   for (let k = 0; k < n; k++) {
@@ -5968,7 +5979,7 @@ window.__carSim = (ri, i0, n, spd) => {
     const want = Math.atan2(-(ax - pos.x), -(az - pos.z));
     let d = want - rally.yaw; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
     rally.inSteer = clamp(-d * 3, -1, 1);
-    rally.gas = rally.vf < spd ? 1 : 0; rally.brake = rally.vf > spd + 3 ? 1 : 0;
+    rally.gas = rally.vf < spd ? 1 : 0; rally.brake = rally.vf > spd + 3 ? 1 : 0; rally.nitroIn = !!nitro;
     rallyStep(1 / 120);
     if (rally.air && !was) { air++; if (at.length < 5) at.push([ci, +rally.vy.toFixed(1), +(pos.y - carGround(pos.x, pos.z)).toFixed(2), Math.round(rally.vf * 3.6)]); } if (rally.air) airT += 1 / 120; was = rally.air; maxVy = Math.max(maxVy, Math.abs(rally.vy));
   }
@@ -5994,7 +6005,6 @@ window.__spots = () => SPOTS.map(S => ({ name: S.name, x: Math.round(S.x), z: Ma
 window.__carTp = (x, z, tx, tz) => carPlaceAt(x, z, tx, tz);
 window.__roadPt = (id, i) => { const R = ROADS.find(q => q.id === id); return [R.X[i], R.Z[i], R.Y[i]]; };
 window.__mesh = (x, z) => meshHeight(x, z);
-window.__dp = () => DP.ready;
 window.__th = (x, z) => terrainHeight(x, z);
 window.__tb = (x, z) => terrainBase(x, z);
 window.__pois = () => POIS.map(p => [p.name, Math.round(p.x), Math.round(p.z)]);
