@@ -2005,7 +2005,7 @@ function textTex(lines, bg, fg, w = 512, h = 128, font = 44) {
   g.fillStyle = fg; g.textAlign = 'center'; g.textBaseline = 'middle';
   const L = Array.isArray(lines) ? lines : [lines], lh = h / (L.length + 0.4);
   L.forEach((t, k) => { g.font = 'bold ' + (k === 0 ? font : Math.round(font * 0.72)) + 'px system-ui,sans-serif'; g.fillText(t, w / 2, lh * (k + 0.7)); });
-  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4; return tex;
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = IS_TOUCH ? 2 : 4; return tex;
 }
 const signPostMat = new THREE.MeshLambertMaterial({ color: 0x8c9096 });
 const SIGNS = [];
@@ -2036,7 +2036,9 @@ function signBoard(x, z, ang, lines, bg = '#1d5aa8', fg = '#ffffff', w = 4.2, h 
   }
   parts.push(new THREE.PlaneGeometry(w, h).rotateY(Math.PI).translate(0, 2.2 + h / 2, -0.03));
   g.add(new THREE.Mesh(mergeStaticGeos(parts), signPostMat));
-  const tex = textTex(lines, bg, fg, 512, Math.round(512 * h / w));
+  // 127 panneaux : 320 px suffisent sur téléphone et économisent ~30 Mo de textures
+  const TW = IS_TOUCH ? 320 : 512;
+  const tex = textTex(lines, bg, fg, TW, Math.round(TW * h / w));
   const pl = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, fog: true }));
   pl.position.set(0, 2.2 + h / 2, 0); g.add(pl);
   scene.add(g);
