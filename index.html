@@ -865,14 +865,26 @@ function jumpH(x, z) {
 /*  rendu                                                              */
 /* ------------------------------------------------------------------ */
 const canvas = document.getElementById('c');
+// Téléphone / tablette : moins de pixels et de détails, la fluidité prime.
+const IS_TOUCH = (navigator.maxTouchPoints || 0) > 1 || (window.matchMedia && matchMedia('(pointer: coarse)').matches);
+const DPR_CAP = IS_TOUCH ? 1.35 : 1.5;
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', logarithmicDepthBuffer: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
-renderer.setSize(innerWidth, innerHeight, false);
+// échelle de rendu adaptative (voir frame) : 1 = pleine résolution, 0.7 = secours
+let renderScale = 1;
+function applyRenderScale() {
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, DPR_CAP) * renderScale);
+  renderer.setSize(innerWidth, innerHeight, false);
+}
+applyRenderScale();
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// ombre simple : le PCF/PCFSoft échantillonnait 9 à 25 fois la shadow map sur chaque
+// pixel de sol (mesuré : 15 fps en PCF contre 27 en Basic sur GPU intégré)
+renderer.shadowMap.type = THREE.BasicShadowMap;
+renderer.shadowMap.autoUpdate = false;          // ombres rafraîchies à ~30 Hz (voir frame)
+renderer.shadowMap.needsUpdate = true;
 
 const scene = new THREE.Scene();
 const SKY_BOT = new THREE.Color(0xcfe0ee);
@@ -953,7 +965,7 @@ scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xfff4e0, 2.4);
 sun.position.copy(SUN_DIR).multiplyScalar(1000);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.mapSize.set(IS_TOUCH ? 1024 : 2048, IS_TOUCH ? 1024 : 2048);
 sun.shadow.bias = -0.00015;
 sun.shadow.normalBias = 0.4;
 const S_SH = 90;
@@ -977,6 +989,7 @@ function applyDayNight() {
   sun.intensity = n ? 0.6 : 2.4;
   sun.color.set(n ? 0xa8c6ff : 0xfff4e0);
   sun.castShadow = !n;
+  renderer.shadowMap.needsUpdate = true;
   if (sunSprite) sunSprite.visible = !n;
   if (moonSprite) moonSprite.visible = n;
   renderer.toneMappingExposure = n ? 1.0 : 1.05;
@@ -1209,14 +1222,16 @@ function dpFinish(J) {
 }
 function dpStep(budget) {
   const J = DP.job; if (!J) return;
-  const N1 = DP.N1, S = DP.S;
-  let used = 0;
+  const N1 = DP.N1, S = DP.S, t0 = performance.now();
+  let used = 0, iter = 0;
   while (J.k < N1 * N1 && used < budget) {
     const i = J.k % N1, j = (J.k / N1) | 0, gx = J.ox + i, gz = J.oz + j;
     const oi = gx - DP.ox, oj = gz - DP.oz;
     if (DP.H && oi >= 0 && oj >= 0 && oi < N1 && oj < N1) J.H[J.k] = DP.H[oj * N1 + oi];
     else { const x = gx * S, z = gz * S; J.H[J.k] = shapeY(x, z, terrainHeight(x, z)); used++; }
     J.k++;
+    // budget temps : jamais plus de ~6 ms par image, sinon gros à-coup quand on vole bas
+    if ((++iter & 255) === 0 && performance.now() - t0 > 6) break;
   }
   if (J.k >= N1 * N1) { dpFinish(J); DP.job = null; }
 }
@@ -1228,7 +1243,7 @@ function dpUpdate(x, z, agl, instant) {
   const ox = Math.round(x / DP.S) - DP.N / 2, oz = Math.round(z / DP.S) - DP.N / 2;
   if (!DP.job && (!DP.ready || Math.abs(ox - DP.ox) > 28 || Math.abs(oz - DP.oz) > 28))
     DP.job = { ox, oz, k: 0, H: new Float32Array(DP.N1 * DP.N1) };
-  dpStep(instant ? 1e9 : (DP.ready ? 1800 : 6000));
+  dpStep(instant ? 1e9 : (DP.ready ? 1800 : 4000));
 }
 
 // --- rubans des routes : goudron (lignes blanches, tirets au milieu) et terre
@@ -1312,22 +1327,30 @@ function mergeGeos(list) {
   out.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
   return out;
 }
-// --- forêt (instanciée : un seul appel de dessin)
+// --- forêt : sapins allégés (31 triangles) répartis en dalles de 4 km
+//     => le frustum culling ne dessine que les dalles visibles (avant : 16 000 arbres
+//     étaient envoyés au GPU en entier, même hors champ, dans la vue et dans les ombres)
 var FOREST = null;
+const FOREST_CHUNKS = [];
+const FOREST_GEO = {};
+const ROADSIDE_TREES = [];
 const TREE_COLS = ['#264720', '#2f5527', '#3a6126', '#2b4c2c', '#224024', '#41622a'];
 {
-  const N = 16000;
-  // sapin : tronc + trois étages de branches, plus clairs vers la pointe
+  const N = IS_TOUCH ? 12000 : 16000;
+  // sapin : tronc + trois étages de branches ; cônes ouverts (les bases ne se voient pas)
   const geo = mergeGeos([
-    [new THREE.CylinderGeometry(0.22, 0.34, 3.2, 6).translate(0, 1.6, 0), [2.0, 0.78, 1.05], [2.0, 0.78, 1.05]],
-    [new THREE.ConeGeometry(2.5, 5.2, 8).translate(0, 4.4, 0), [0.72, 0.74, 0.7], [1.0, 1.02, 0.95]],
-    [new THREE.ConeGeometry(1.95, 4.4, 8).translate(0, 6.9, 0), [0.8, 0.82, 0.76], [1.1, 1.12, 1.0]],
-    [new THREE.ConeGeometry(1.3, 3.8, 8).translate(0, 9.3, 0), [0.9, 0.92, 0.84], [1.25, 1.25, 1.1]]
+    [new THREE.CylinderGeometry(0.22, 0.34, 3.2, 5, 1, true).translate(0, 1.6, 0), [2.0, 0.78, 1.05], [2.0, 0.78, 1.05]],
+    [new THREE.ConeGeometry(2.5, 5.2, 7, 1, true).translate(0, 4.4, 0), [0.72, 0.74, 0.7], [1.0, 1.02, 0.95]],
+    [new THREE.ConeGeometry(1.95, 4.4, 7, 1, true).translate(0, 6.9, 0), [0.8, 0.82, 0.76], [1.1, 1.12, 1.0]],
+    [new THREE.ConeGeometry(1.3, 3.8, 7, 1, true).translate(0, 9.3, 0), [0.9, 0.92, 0.84], [1.25, 1.25, 1.1]]
   ]);
+  // version lointaine : un simple cône (5 triangles) suffit à 3 km
+  const geoFar = mergeGeos([[new THREE.ConeGeometry(2.6, 12, 5, 1, true), [0.72, 0.76, 0.7], [1.05, 1.1, 1.0]]]);
+  FOREST_GEO.near = geo; FOREST_GEO.far = geoFar;
   const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
-  const inst = new THREE.InstancedMesh(geo, mat, N);
   const m4 = new THREE.Matrix4(), q0 = new THREE.Quaternion(), sc = new THREE.Vector3(), pv = new THREE.Vector3();
-  const col = new THREE.Color();
+  const col = new THREE.Color(), CELL = 4000, cells = new Map();
+  const up = new THREE.Vector3(0, 1, 0);
   let n = 0, guard = 0;
   while (n < N && guard++ < N * 40) {
     let x, z;
@@ -1345,20 +1368,27 @@ const TREE_COLS = ['#264720', '#2f5527', '#3a6126', '#2b4c2c', '#224024', '#4162
     if (airportMask(x, z) > 0.15) continue;
     if (decorNoTree(x, z)) continue;
     const s = 0.65 + Math.random() * 1.35;
-    pv.set(x, h - 0.4, z);
-    sc.set(s * (0.8 + Math.random() * 0.4), s, s * (0.8 + Math.random() * 0.4));
-    q0.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.random() * 6.28);
-    m4.compose(pv, q0, sc);
-    inst.setMatrixAt(n, m4);
-    col.setStyle(TREE_COLS[(Math.random() * TREE_COLS.length) | 0]);
-    inst.setColorAt(n, col);
+    const key = Math.floor(x / CELL) + ':' + Math.floor(z / CELL);
+    let list = cells.get(key); if (!list) cells.set(key, list = []);
+    list.push([x, h - 0.4, z, s * (0.8 + Math.random() * 0.4), s, s * (0.8 + Math.random() * 0.4),
+      Math.random() * 6.28, TREE_COLS[(Math.random() * TREE_COLS.length) | 0]]);
     n++;
   }
-  inst.count = n;
-  inst.instanceMatrix.needsUpdate = true;
-  if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
-  scene.add(inst);
-  FOREST = inst;
+  for (const list of cells.values()) {
+    const inst = new THREE.InstancedMesh(geo, mat, list.length);
+    list.forEach(([x, y, z, sx, sy, sz, ry, c], k) => {
+      m4.compose(pv.set(x, y, z), q0.setFromAxisAngle(up, ry), sc.set(sx, sy, sz));
+      inst.setMatrixAt(k, m4);
+      inst.setColorAt(k, col.setStyle(c));
+    });
+    inst.instanceMatrix.needsUpdate = true;
+    if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+    inst.computeBoundingSphere();
+    inst.userData.far = false;
+    scene.add(inst);
+    FOREST_CHUNKS.push(inst);
+  }
+  FOREST = { count: n, chunks: FOREST_CHUNKS };
 }
 
 /* ------------------------------------------------------------------ */
@@ -1418,7 +1448,7 @@ const GRASS = (() => {
     vec4 wq = instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
     transformed.x += position.y * 0.18 * sin(uT * 1.7 + wq.x * 0.08 + wq.z * 0.05);
     transformed.z += position.y * 0.12 * sin(uT * 1.3 + wq.z * 0.07);`); };
-  const CELL = 36, R = 3, PER = 90, SL = (2 * R + 1) ** 2;
+  const CELL = 36, R = IS_TOUCH ? 2 : 3, PER = IS_TOUCH ? 70 : 90, SL = (2 * R + 1) ** 2;
   const im = new THREE.InstancedMesh(geo, mat, SL * PER); im.frustumCulled = false; im.visible = false;
   scene.add(im);
   const slots = new Map(), free = []; for (let k = 0; k < SL; k++) free.push(k);
@@ -1560,6 +1590,7 @@ const TUNNELS = [];
 }
 
 const decorAnim = [];            // fonctions (dt, t) appelées à chaque image
+const TURBINE_GROUPS = [];       // éoliennes : 6 maillages chacune, masquées au loin
 const cityNight = { value: 0 };
 
 // --- la ville
@@ -1876,6 +1907,7 @@ const cityNight = { value: 0 };
     }
     g.position.set(x, y, z); g.rotation.y = 0.5;
     scene.add(g);
+    TURBINE_GROUPS.push(g);
     obCyl(x, z, 3, y - 5, y + 94);
     const sp = 0.9 + (i % 3) * 0.15;
     decorAnim.push((dt) => { rotor.rotation.z += dt * sp; });
@@ -1976,6 +2008,7 @@ function textTex(lines, bg, fg, w = 512, h = 128, font = 44) {
   const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4; return tex;
 }
 const signPostMat = new THREE.MeshLambertMaterial({ color: 0x8c9096 });
+const SIGNS = [];
 function signBoard(x, z, ang, lines, bg = '#1d5aa8', fg = '#ffffff', w = 4.2, h = 1.6, y0 = null, poles = 2) {
   const y = y0 ?? terrainHeight(x, z);
   const g = new THREE.Group(); g.position.set(x, y, z); g.rotation.y = ang;
@@ -1986,6 +2019,7 @@ function signBoard(x, z, ang, lines, bg = '#1d5aa8', fg = '#ffffff', w = 4.2, h 
   pl.position.set(0, 2.2 + h / 2, 0); g.add(pl);
   const back = new THREE.Mesh(new THREE.PlaneGeometry(w, h), signPostMat); back.position.set(0, 2.2 + h / 2, -0.03); back.rotation.y = Math.PI; g.add(back);
   scene.add(g);
+  SIGNS.push(g);
   return g;
 }
 function poi(name, x, z, kind) { POIS.push({ name, x, z, kind }); }
@@ -2333,19 +2367,23 @@ function zone(x, z, r) { DECOR_ZONES.push([x, z, r]); }
       }
     });
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), sc = new THREE.Vector3(), cc = new THREE.Color();
-    const mk = (geo, mat, list, f) => { const im = new THREE.InstancedMesh(geo, mat, Math.max(1, list.length)); list.forEach((t, k) => { f(t, k, im); }); im.count = list.length; im.castShadow = true; scene.add(im); return im; };
+    const mk = (geo, mat, list, f, cast = true) => { const im = new THREE.InstancedMesh(geo, mat, Math.max(1, list.length)); list.forEach((t, k) => { f(t, k, im); }); im.count = list.length; im.castShadow = cast; scene.add(im); return im; };
     const trunkMat = new THREE.MeshLambertMaterial({ color: 0x5b4330 }), leafMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, flatShading: true });
+    // houppier : 2 masses au lieu de 4 (320 -> 160 triangles par arbre) et pas d'ombre portée
+    // (le feuillage représentait à lui seul ~2,9 M de triangles avec le passage d'ombre)
     const tg = new THREE.CylinderGeometry(0.25, 0.4, 5, 6).translate(0, 2.5, 0), cg = mergeGeos([
-      [new THREE.IcosahedronGeometry(2.6, 1).translate(0, 6.2, 0), [0.7, 0.72, 0.68], [1.1, 1.1, 1.0]],
-      [new THREE.IcosahedronGeometry(2.0, 1).translate(1.7, 7.2, 0.6), [0.8, 0.8, 0.75], [1.15, 1.15, 1.05]],
-      [new THREE.IcosahedronGeometry(1.9, 1).translate(-1.4, 7.4, -0.9), [0.8, 0.8, 0.75], [1.15, 1.15, 1.05]],
-      [new THREE.IcosahedronGeometry(1.7, 1).translate(0.2, 8.6, 0.3), [0.95, 0.95, 0.9], [1.25, 1.25, 1.1]]]);
+      [new THREE.IcosahedronGeometry(3.0, 1).translate(0, 6.4, 0), [0.7, 0.72, 0.68], [1.1, 1.1, 1.0]],
+      [new THREE.IcosahedronGeometry(2.4, 1).translate(0.9, 7.7, 0.4), [0.8, 0.8, 0.75], [1.15, 1.15, 1.05]]]);
     const LC = ['#3f6f2a', '#4d7d30', '#5a8a35', '#36602a', '#6a8e3a', '#7a9a3e'];
-    mk(tg, trunkMat, leafy, ([x, h, z, s2, r], k, im) => { m4.compose(new THREE.Vector3(x, h - 0.2, z), q.setFromAxisAngle(up, r), sc.set(s2, s2, s2)); im.setMatrixAt(k, m4); });
-    mk(cg, leafMat, leafy, ([x, h, z, s2, r, c], k, im) => { m4.compose(new THREE.Vector3(x, h - 0.2, z), q.setFromAxisAngle(up, r), sc.set(s2, s2 * (0.85 + c * 0.3), s2)); im.setMatrixAt(k, m4); im.setColorAt(k, cc.setStyle(LC[(c * LC.length) | 0])); });
+    ROADSIDE_TREES.push(
+      mk(tg, trunkMat, leafy, ([x, h, z, s2, r], k, im) => { m4.compose(new THREE.Vector3(x, h - 0.2, z), q.setFromAxisAngle(up, r), sc.set(s2, s2, s2)); im.setMatrixAt(k, m4); }),
+      mk(cg, leafMat, leafy, ([x, h, z, s2, r, c], k, im) => { m4.compose(new THREE.Vector3(x, h - 0.2, z), q.setFromAxisAngle(up, r), sc.set(s2, s2 * (0.85 + c * 0.3), s2)); im.setMatrixAt(k, m4); im.setColorAt(k, cc.setStyle(LC[(c * LC.length) | 0])); }, false)
+    );
     const pt = new THREE.CylinderGeometry(0.22, 0.32, 9, 5).translate(0, 4.5, 0), pc = new THREE.ConeGeometry(3.6, 1.6, 7).translate(0, 9.2, 0);
-    mk(pt, new THREE.MeshLambertMaterial({ color: 0x8a6a48 }), palms, ([x, h, z, s2, r], k, im) => { m4.compose(new THREE.Vector3(x, h - 0.2, z), q.setFromAxisAngle(up, r).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), (s2 - 1.1) * 0.25)), sc.set(s2, s2, s2)); im.setMatrixAt(k, m4); });
-    mk(pc, new THREE.MeshLambertMaterial({ color: 0x3d8a35, flatShading: true }), palms, ([x, h, z, s2, r], k, im) => { m4.compose(new THREE.Vector3(x, h - 0.2, z), q.setFromAxisAngle(up, r).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), (s2 - 1.1) * 0.25)), sc.set(s2, s2, s2)); im.setMatrixAt(k, m4); });
+    ROADSIDE_TREES.push(
+      mk(pt, new THREE.MeshLambertMaterial({ color: 0x8a6a48 }), palms, ([x, h, z, s2, r], k, im) => { m4.compose(new THREE.Vector3(x, h - 0.2, z), q.setFromAxisAngle(up, r).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), (s2 - 1.1) * 0.25)), sc.set(s2, s2, s2)); im.setMatrixAt(k, m4); }),
+      mk(pc, new THREE.MeshLambertMaterial({ color: 0x3d8a35, flatShading: true }), palms, ([x, h, z, s2, r], k, im) => { m4.compose(new THREE.Vector3(x, h - 0.2, z), q.setFromAxisAngle(up, r).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), (s2 - 1.1) * 0.25)), sc.set(s2, s2, s2)); im.setMatrixAt(k, m4); })
+    );
     for (const [x, h, z] of leafy) obCyl(x, z, 0.5, h - 1, h + 5);
     for (const [x, h, z] of palms) obCyl(x, z, 0.4, h - 1, h + 8);
     window.__treeCount = [leafy.length, palms.length];
@@ -2376,12 +2414,16 @@ function zone(x, z, r) { DECOR_ZONES.push([x, z, r]); }
     const m4 = new THREE.Matrix4(), zero = new THREE.Matrix4().makeScale(0, 0, 0), p = new THREE.Vector3();
     const zg = new Map(); for (const zn of DECOR_ZONES) { const k = Math.floor(zn[0] / 500) * 1000 + Math.floor(zn[1] / 500); for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) { const kk = k + a * 1000 + b; let L = zg.get(kk); if (!L) zg.set(kk, L = []); L.push(zn); } }
     let cut = 0;
-    for (let i = 0; i < FOREST.count; i++) {
-      FOREST.getMatrixAt(i, m4); p.setFromMatrixPosition(m4);
-      const L = zg.get(Math.floor(p.x / 500) * 1000 + Math.floor(p.z / 500)); if (!L) continue;
-      for (const zn of L) if ((p.x - zn[0]) ** 2 + (p.z - zn[1]) ** 2 < zn[2] * zn[2]) { FOREST.setMatrixAt(i, zero); cut++; break; }
+    for (const chunk of FOREST_CHUNKS) {
+      for (let i = 0; i < chunk.count; i++) {
+        chunk.getMatrixAt(i, m4); p.setFromMatrixPosition(m4);
+        const L = zg.get(Math.floor(p.x / 500) * 1000 + Math.floor(p.z / 500)); if (!L) continue;
+        for (const zn of L) if ((p.x - zn[0]) ** 2 + (p.z - zn[1]) ** 2 < zn[2] * zn[2]) { chunk.setMatrixAt(i, zero); cut++; break; }
+      }
+      chunk.instanceMatrix.needsUpdate = true;
+      chunk.computeBoundingSphere();
     }
-    FOREST.instanceMatrix.needsUpdate = true; window.__forestCut = cut;
+    window.__forestCut = cut;
   }
 }
 function JUNC_ENDS(ri, end) {
@@ -2433,8 +2475,10 @@ function updateDecor(dt) {
   for (const f of decorAnim) f(dt, simT);
 }
 
-// --- nuages (sprites additifs, peu coûteux)
+// --- nuages : un seul maillage instancié de quads face caméra par épaisseur
+//     (avant : un Sprite = un appel de dessin, soit ~600 appels pour le ciel)
 const cloudMats = [];
+const cloudRoll = { value: 0 };
 const _cR = new THREE.Vector3(), _cU = new THREE.Vector3();
 {
   const cv = document.createElement('canvas');
@@ -2446,18 +2490,34 @@ const _cR = new THREE.Vector3(), _cU = new THREE.Vector3();
   grd.addColorStop(1, 'rgba(255,255,255,0)');
   g.fillStyle = grd; g.fillRect(0, 0, 128, 128);
   const tex = new THREE.CanvasTexture(cv);
-  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.88, fog: true });
-  const mat2 = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.55, fog: true });
-  mat.userData.dayOpacity = 0.88; mat2.userData.dayOpacity = 0.55;
-  cloudMats.push(mat, mat2);
-  for (const m of [mat, mat2]) {
+  const makeMat = (op) => {
+    const m = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, opacity: op, fog: true });
+    m.userData.dayOpacity = op;
     m.onBeforeCompile = sh => {
-      sh.vertexShader = 'varying float vCD;\n' + sh.vertexShader.replace('#include <fog_vertex>', '#include <fog_vertex>\n vCD = -mvPosition.z;');
+      sh.uniforms.uRoll = cloudRoll;
+      sh.vertexShader = 'uniform float uRoll;\nvarying float vCD;\n' + sh.vertexShader
+        .replace('#include <project_vertex>', `
+          vec4 mvPosition = vec4( transformed, 1.0 );
+          #ifdef USE_INSTANCING
+            vec4 cip = instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+            mvPosition = modelViewMatrix * cip;
+            vec2 q = position.xy, sc2 = vec2(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz));
+            float cr = cos(uRoll), sr = sin(uRoll);
+            mvPosition.xy += vec2(q.x * cr - q.y * sr, q.x * sr + q.y * cr) * sc2;
+          #else
+            mvPosition = modelViewMatrix * mvPosition;
+          #endif
+          gl_Position = projectionMatrix * mvPosition;
+        `)
+        .replace('#include <fog_vertex>', '#include <fog_vertex>\n vCD = -mvPosition.z;');
       sh.fragmentShader = 'varying float vCD;\n' + sh.fragmentShader.replace('#include <fog_fragment>', 'gl_FragColor.a *= smoothstep(80.0, 520.0, vCD);\n#include <fog_fragment>');
     };
-    m.customProgramCacheKey = () => 'cloudfade';
-  }
-  const group = new THREE.Group();
+    m.customProgramCacheKey = () => 'cloudbillboard';
+    return m;
+  };
+  const mat = makeMat(0.88), mat2 = makeMat(0.55);
+  cloudMats.push(mat, mat2);
+  const groups = [[], []];
   for (let c = 0; c < 80; c++) {
     const a = Math.random() * Math.PI * 2, rr = 700 + Math.random() * 26000;
     const cx = Math.cos(a) * rr, cz = Math.sin(a) * rr;
@@ -2465,14 +2525,25 @@ const _cR = new THREE.Vector3(), _cU = new THREE.Vector3();
     const cy = Math.max(720 + Math.random() * 1100, top + 450);          // jamais coupés par une montagne
     const puffs = 5 + Math.floor(Math.random() * 6);
     for (let i = 0; i < puffs; i++) {
-      const s = new THREE.Sprite(Math.random() < 0.5 ? mat : mat2);
       const sc = 380 + Math.random() * 720;
-      s.scale.set(sc, sc * (0.45 + Math.random() * 0.35), 1);
-      s.position.set(cx + (Math.random() - 0.5) * 1200, cy + (Math.random() - 0.5) * 220, cz + (Math.random() - 0.5) * 1200);
-      group.add(s);
+      groups[Math.random() < 0.5 ? 0 : 1].push([
+        cx + (Math.random() - 0.5) * 1200, cy + (Math.random() - 0.5) * 220, cz + (Math.random() - 0.5) * 1200,
+        sc, sc * (0.45 + Math.random() * 0.35)]);
     }
   }
-  scene.add(group);
+  const quad = new THREE.PlaneGeometry(1, 1);
+  const m4 = new THREE.Matrix4(), q0 = new THREE.Quaternion(), pv = new THREE.Vector3(), sv = new THREE.Vector3();
+  groups.forEach((list, gi) => {
+    const im = new THREE.InstancedMesh(quad, gi ? mat2 : mat, Math.max(1, list.length));
+    list.forEach(([x, y, z, sx, sy], k) => {
+      m4.compose(pv.set(x, y, z), q0.identity(), sv.set(sx, sy, 1));
+      im.setMatrixAt(k, m4);
+    });
+    im.count = list.length;
+    im.instanceMatrix.needsUpdate = true;
+    im.computeBoundingSphere();
+    scene.add(im);
+  });
 }
 
 // --- traînées de condensation (jets)
@@ -2585,10 +2656,11 @@ const runwayMat = new THREE.MeshStandardMaterial({ color: 0x3e4348, roughness: 0
 const taxiMat = new THREE.MeshStandardMaterial({ color: 0x44484c, roughness: 0.95, metalness: 0.02 });
 const lineMat = new THREE.MeshBasicMaterial({ color: 0xf0f2ec });
 const taxiLineMat = new THREE.MeshBasicMaterial({ color: 0xf0c842 });
+// les marquages (plusieurs centaines de petits rectangles) sont regroupés en 2
+// InstancedMesh : 2 appels de dessin au lieu d'environ 200
+const MARKS = [[], []];
 const mk = (w, l, x, z, mat=lineMat, y=RW_Y) => {
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, l).rotateX(-Math.PI / 2), mat);
-  m.position.set(x, y + 0.025, z);
-  scene.add(m);
+  MARKS[mat === taxiLineMat ? 1 : 0].push([w, l, x, z, y + 0.025]);
 };
 for (const r of RUNWAYS) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(r.w, 0.6, r.l), runwayMat);
@@ -2639,6 +2711,23 @@ for (const t of TAXIWAYS) {
     for (let i = -3; i <= 3; i++) { if (!i) continue; mk(2.0, 26, r.x + i * 4.1, r.z + end * (r.l/2 - 32)); }
     mk(r.w - 8, 3.2, r.x, r.z + end * (r.l/2 - 12));
   }
+}
+// construction des 2 lots de marquages
+{
+  const m4 = new THREE.Matrix4(), q0 = new THREE.Quaternion(), pv = new THREE.Vector3(), sv = new THREE.Vector3();
+  MARKS.forEach((list, i) => {
+    if (!list.length) return;
+    const geo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+    const im = new THREE.InstancedMesh(geo, i ? taxiLineMat : lineMat, list.length);
+    list.forEach(([w, l, x, z, y], k) => {
+      m4.compose(pv.set(x, y, z), q0.identity(), sv.set(w, 1, l));
+      im.setMatrixAt(k, m4);
+    });
+    im.count = list.length;
+    im.instanceMatrix.needsUpdate = true;
+    im.computeBoundingSphere();
+    scene.add(im);
+  });
 }
 // --- lumières de nuit : nuages de points lumineux (peu coûteux)
 function makeGlowTexture() {
@@ -3452,7 +3541,7 @@ function step(dt) {
 const ctlCanvas = document.getElementById('ctl');
 const ctl2d = ctlCanvas.getContext('2d');
 function sizeCtl() {
-  const d = Math.min(window.devicePixelRatio || 1, 2);
+  const d = Math.min(window.devicePixelRatio || 1, 1.5);
   ctlCanvas.width = innerWidth * d; ctlCanvas.height = innerHeight * d;
   ctlCanvas.style.width = innerWidth + 'px'; ctlCanvas.style.height = innerHeight + 'px';
   ctl2d.setTransform(d, 0, 0, d, 0, 0);
@@ -3694,12 +3783,20 @@ let mapReady = false;
 function buildMap() {
   const g = mapTiles.getContext('2d');
   const img = g.createImageData(MAP_N, MAP_N);
-  const D = mapTiles;
+  // lecture du relief grossier déjà construit (102 400 appels à terrainHeight =
+  // plusieurs secondes de blocage au démarrage sur téléphone)
+  const N1 = T_N1, A = tPosArr, HALF = T_SIZE / 2;
+  const H = (ix, iz, a, b) => A[((iz + b) * N1 + ix + a) * 3 + 1];
   for (let j = 0; j < MAP_N; j++) {
     for (let i = 0; i < MAP_N; i++) {
       const x = (i / (MAP_N - 1) - 0.5) * T_SIZE;
       const z = (j / (MAP_N - 1) - 0.5) * T_SIZE;
-      const h = terrainHeight(x, z);
+      const fx = (x + HALF) / T_SEGW, fz = (z + HALF) / T_SEGW;
+      const ix = clamp(Math.floor(fx), 0, T_SEG - 1), iz = clamp(Math.floor(fz), 0, T_SEG - 1);
+      const u = clamp(fx - ix, 0, 1), v = clamp(fz - iz, 0, 1);
+      let h;
+      if (u + v <= 1) { const ha = H(ix, iz, 0, 0); h = ha + (H(ix, iz, 1, 0) - ha) * u + (H(ix, iz, 0, 1) - ha) * v; }
+      else { const hc = H(ix, iz, 1, 1); h = hc + (H(ix, iz, 0, 1) - hc) * (1 - u) + (H(ix, iz, 1, 0) - hc) * (1 - v); }
       let r, gg, b;
       if (h < 0)        { r = 24; gg = 62; b = 96; }
       else if (h < 25)  { r = 156; gg = 172; b = 116; }
@@ -3978,12 +4075,33 @@ function drawControls() {
 /* ------------------------------------------------------------------ */
 const FIXED = 1 / 120;
 let acc = 0, last = performance.now(), fpsT = 0, fpsN = 0, frameN = 0;
+let shadowT = 0, hudAcc = 0, uiAcc = 0, qAcc = 0, qN = 0, qWarm = 5;
+const SHADOW_DT = IS_TOUCH ? 1 / 20 : 1 / 30;
 
 function frame(now) {
-  const dtReal = Math.min((now - last) / 1000, 0.25);
+  // clamp : la première image peut arriver avec un horodatage antérieur à `last`
+  // (long blocage de construction) -> un dt négatif gelait HUD, commandes et physique
+  const dtReal = clamp((now - last) / 1000, 0, 0.25);
   last = now;
   fpsT += dtReal; fpsN++;
   if (fpsT > 0.5) { hudFps.textContent = (fpsN / fpsT).toFixed(0); fpsT = 0; fpsN = 0; }
+
+  // résolution adaptative : si l'image coûte trop cher, on baisse le nombre de pixels
+  // (et on remonte dès que la marge revient). Évite le 10-15 fps sur GPU de téléphone.
+  if (!document.hidden) {
+    if (qWarm > 0) { qWarm -= dtReal; qAcc = 0; qN = 0; }
+    else {
+      qAcc += dtReal; qN++;
+      if (qAcc > 1.2) {
+        const ms = (qAcc / qN) * 1000;
+        let s = renderScale;
+        if (ms > 34 && s > 0.7) s = Math.max(0.7, s - 0.1);
+        else if (ms < 24 && s < 1) s = Math.min(1, s + 0.05);
+        if (s !== renderScale) { renderScale = s; applyRenderScale(); }
+        qAcc = 0; qN = 0;
+      }
+    }
+  }
 
   const kb = keyboard();
   const EXPO = PLANES[planeIdx].perf.expo ?? 0.45;
@@ -3999,9 +4117,9 @@ function frame(now) {
   else target.rud = 0;
 
   if (!crashed) {
-    acc += Math.min(dtReal, 0.1);
+    acc += Math.min(dtReal, 0.05);          // jamais plus de 6 pas de physique par image
     let guard = 0;
-    while (acc >= FIXED && guard++ < 16) {
+    while (acc >= FIXED && guard++ < 8) {
       prevPos.copy(pos); prevQuat.copy(quat);
       if (rally && rally.on) rallyStep(FIXED); else step(FIXED);
       acc -= FIXED;
@@ -4029,12 +4147,15 @@ function frame(now) {
   if (window.__camO) { const o = window.__camO; camera.position.set(o[0], o[1], o[2]); camera.up.set(0, 1, 0); camera.lookAt(o[3], o[4], o[5]); }
   if (rally && rally.on) aircraft.visible = false;
   sky.position.copy(camera.position);
-  updateHUD();
+  hudAcc += dtReal;
+  if (hudAcc >= 0.1) { updateHUD(); hudAcc = 0; }
 
   // ombre portée + ombres dynamiques qui suivent l'avion
   {
-    const gy = groundAt(rPos.x, rPos.z) + 0.12;
-    const agl = clamp(rPos.y - gy, 0, 250);
+    const groundNow = groundAt(rPos.x, rPos.z);
+    const aglReal = rPos.y - groundNow;
+    const gy = groundNow + 0.12;
+    const agl = clamp(aglReal - 0.12, 0, 250);
     shadowMesh.position.set(rPos.x, gy, rPos.z);
     const sc = 13 + agl * 0.09;
     shadowMesh.scale.set(sc, 1, sc * 1.15);
@@ -4052,27 +4173,60 @@ function frame(now) {
     sun.target.position.copy(_shP);
     sun.target.updateMatrixWorld();
     sun.position.copy(_shP).addScaledVector(LD, 800);
+
+    // en vol haut, les ombres portées au sol ne se voient plus : on coupe le passage
+    // d'ombre (il coûtait ~25 % du budget image). Hystérésis large (600 m / 300 m) pour
+    // ne pas recompiler les shaders en boucle quand on vole autour du seuil.
+    const wantSunShadow = !isNight && (sun.castShadow ? aglReal < 600 : aglReal < 300);
+    if (sun.castShadow !== wantSunShadow) { sun.castShadow = wantSunShadow; renderer.shadowMap.needsUpdate = true; }
+
+    // détail à distance : panneaux lisibles, arbres de bord de route et forêt lointaine.
+    // Ces objets ne pèsent plus dans le budget quand on monte (ils sont minuscules).
+    if ((frameN & 15) === 0) {
+      const cx = camera.position.x, cy = camera.position.y, cz = camera.position.z;
+      for (const g of SIGNS) {
+        const dx = g.position.x - cx, dy = g.position.y - cy, dz = g.position.z - cz;
+        g.visible = dx * dx + dy * dy + dz * dz < 650 * 650;
+      }
+      for (const g of TURBINE_GROUPS) {
+        const dx = g.position.x - cx, dz = g.position.z - cz;
+        g.visible = dx * dx + dz * dz < 7000 * 7000;
+      }
+      const showRoad = aglReal < (ROADSIDE_TREES[0] && ROADSIDE_TREES[0].visible ? 450 : 380);
+      for (const m of ROADSIDE_TREES) m.visible = showRoad;
+      for (const ch of FOREST_CHUNKS) {
+        const bs = ch.boundingSphere; if (!bs) continue;
+        const dx = bs.center.x - cx, dy = bs.center.y - cy, dz = bs.center.z - cz;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        const far = ch.userData.far ? d2 > 2500 * 2500 : d2 > 3200 * 3200;
+        if (far !== ch.userData.far) { ch.userData.far = far; ch.geometry = far ? FOREST_GEO.far : FOREST_GEO.near; }
+      }
+    }
   }
   waterMat.uniforms.time.value = simT;
   skyMat.uniforms.time.value = simT;
   if (isNight && aircraft.userData.nav) aircraft.userData.nav.beacon.visible = (simT % 1.15) < 0.12;
   updateContrails(dtReal);
 
-  drawControls();
+  uiAcc += dtReal;
+  if (uiAcc >= 0.033) { drawControls(); uiAcc = 0; }   // 30 Hz suffit pour les manches
   if (typeof drawCombatOverlay === 'function') drawCombatOverlay();
   drawAH();
   if ((frameN++ & 3) === 0) { drawMap(); updateAudio(); }
   {   // les nuages restent horizontaux quand l'avion s'incline
     _cR.set(1, 0, 0).applyQuaternion(camera.quaternion); _cU.set(0, 1, 0).applyQuaternion(camera.quaternion);
-    const roll = -Math.atan2(_cR.y, _cU.y);
-    for (const m of cloudMats) m.rotation = roll;
+    cloudRoll.value = -Math.atan2(_cR.y, _cU.y);
   }
+  // ombres : rafraîchies ~30 fois/s au lieu de 60 (le soleil suit l'avion, le décalage
+  // d'une image est invisible ; le passage d'ombre coûtait presque autant que la scène)
+  shadowT += dtReal;
+  if (shadowT >= SHADOW_DT) { shadowT = 0; renderer.shadowMap.needsUpdate = true; }
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
 
 addEventListener('resize', () => {
-  renderer.setSize(innerWidth, innerHeight, false);
+  applyRenderScale();
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   sizeCtl();
@@ -5528,7 +5682,7 @@ el('brally').addEventListener('click', e => {
 // ===================================================================
 // circulation : voitures autonomes sur les routes
 // ===================================================================
-const TRAF_N = 56;
+const TRAF_N = IS_TOUCH ? 36 : 56;
 // gabarits : berline, SUV, fourgon, camion — fusionnés et instanciés (3 appels de dessin par gabarit)
 const TRAF_TYPES = (() => {
   const merge = (parts) => {
