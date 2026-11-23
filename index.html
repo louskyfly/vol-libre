@@ -752,9 +752,9 @@ function terrainHeight(x, z) {
   if (!nearRoad(x, z, NEAR2)) return FLATS.length ? flatsApply(h, x, z) : h;
   const q = roadQuery(x, z, 62);
   let out = h;
-  if (q.R && q.R.tun[q.i] && h < q.y + 9) {                 // tunnel : la colline recouvre toujours la galerie
-    const e = q.d - (q.R.hw + 4.5), u = clamp(e / 14, 0, 1);
-    out = lerp(q.y + 9, h, e <= 0 ? 0 : u * u * (3 - 2 * u));
+  if (q.R && q.R.tun[q.i] && h < q.y + 10) {                // tunnel : la colline recouvre toute la galerie (et ses côtés)
+    const e = q.d - (q.R.hw + 5.5), u = clamp(e / 12, 0, 1);
+    out = lerp(q.y + 9.6, h, e <= 0 ? 0 : u * u * (3 - 2 * u));
   } else if (q.R && !q.R.nt[q.i]) {
     const R = q.R, plat = R.hw + (R.kind ? 2.2 : 3.2) + 0.6, ty = q.y - 0.14;
     if (q.d < plat) out = ty;
@@ -867,7 +867,7 @@ function jumpH(x, z) {
 const canvas = document.getElementById('c');
 // Téléphone / tablette : moins de pixels et de détails, la fluidité prime.
 const IS_TOUCH = (navigator.maxTouchPoints || 0) > 1 || (window.matchMedia && matchMedia('(pointer: coarse)').matches);
-const DPR_CAP = IS_TOUCH ? 1.35 : 1.5;
+const DPR_CAP = IS_TOUCH ? 1.2 : 1.4;
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', logarithmicDepthBuffer: true });
 // échelle de rendu adaptative (voir frame) : 1 = pleine résolution, 0.7 = secours
 let renderScale = 1;
@@ -1065,30 +1065,22 @@ water.receiveShadow = true;
 scene.add(water);
 
 // --- relief
-const T_SIZE = 56000, T_SEG = IS_TOUCH ? 448 : 576;   // moins de sommets sur téléphone
+const T_SIZE = 56000, T_SEG = IS_TOUCH ? 320 : 480;   // moins de sommets sur téléphone
 
-// texture de sol : herbe fine, touffes, terre, cailloux (répétée tous les ~78 m, mélangée à deux échelles dans le shader)
+// texture de sol : uniquement de grandes taches de teinte (plus de brins d'herbe ni de petits cailloux)
 function groundTexture() {
-  const S = 1024, cv = document.createElement('canvas');
+  const S = 512, cv = document.createElement('canvas');
   cv.width = cv.height = S;
   const g = cv.getContext('2d');
   g.fillStyle = '#b4bf9c'; g.fillRect(0, 0, S, S);
   const blob = (n, rmin, rmax, cols) => { for (let i = 0; i < n; i++) { const x = Math.random() * S, y = Math.random() * S, r = rmin + Math.random() * (rmax - rmin);
     g.fillStyle = cols[(Math.random() * cols.length) | 0]; const ry = r * (0.6 + Math.random() * 0.6), ro = Math.random() * 3;
     for (const dx of x < r ? [0, S] : x > S - r ? [0, -S] : [0]) for (const dy of y < r ? [0, S] : y > S - r ? [0, -S] : [0]) { g.beginPath(); g.ellipse(x + dx, y + dy, r, ry, ro, 0, 7); g.fill(); } } };
-  blob(900, 18, 60, ['rgba(120,140,96,0.22)', 'rgba(232,236,210,0.18)', 'rgba(150,128,92,0.14)']);
-  blob(2600, 2, 7, ['rgba(96,118,78,0.45)', 'rgba(226,232,204,0.35)', 'rgba(140,120,88,0.3)']);
-  // brins d'herbe
-  for (let i = 0; i < 12000; i++) {
-    const x = 8 + Math.random() * (S - 16), y = 10 + Math.random() * (S - 20), l = 3 + Math.random() * 7, a = -Math.PI / 2 + (Math.random() - 0.5) * 0.9;
-    g.strokeStyle = Math.random() < 0.55 ? 'rgba(78,104,60,0.5)' : 'rgba(236,240,214,0.42)'; g.lineWidth = 1 + Math.random();
-    g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l); g.stroke();
-  }
-  blob(700, 1, 2.5, ['rgba(250,250,245,0.55)', 'rgba(70,64,56,0.5)']);   // petits cailloux
+  blob(650, 22, 70, ['rgba(120,140,96,0.22)', 'rgba(232,236,210,0.16)', 'rgba(150,128,92,0.13)']);
   const t = new THREE.CanvasTexture(cv);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.repeat.set(720, 720);
-  t.anisotropy = 8;
+  t.repeat.set(420, 420);
+  t.anisotropy = IS_TOUCH ? 2 : 4;
   return t;
 }
 // couleur du sol selon l'altitude, la pente et des taches naturelles (prairies grasses, herbes sèches, roche, neige)
@@ -1119,9 +1111,7 @@ function terrainMaterial(extraVertex) {
     sh.fragmentShader = sh.fragmentShader.replace('#include map_fragment', `
       #ifdef USE_MAP
         vec4 tA = texture2D(map, vMapUv);
-        vec4 tB = texture2D(map, vMapUv * 0.137 + vec2(0.31, 0.77));
-        vec4 tC = texture2D(map, vMapUv * 0.021 + vec2(0.53, 0.11));
-        diffuseColor.rgb *= mix(tA.rgb, tB.rgb, 0.45) * (0.82 + 0.36 * tC.g) * 1.08;
+        diffuseColor.rgb *= tA.rgb * 1.06;
       #endif`);
   };
   return m;
@@ -1336,7 +1326,7 @@ const FOREST_GEO = {};
 const ROADSIDE_TREES = [];
 const TREE_COLS = ['#264720', '#2f5527', '#3a6126', '#2b4c2c', '#224024', '#41622a'];
 {
-  const N = IS_TOUCH ? 12000 : 16000;
+  const N = IS_TOUCH ? 7000 : 12000;
   // sapin : tronc + trois étages de branches ; cônes ouverts (les bases ne se voient pas)
   const geo = mergeGeos([
     [new THREE.CylinderGeometry(0.22, 0.34, 3.2, 5, 1, true).translate(0, 1.6, 0), [2.0, 0.78, 1.05], [2.0, 0.78, 1.05]],
@@ -1425,64 +1415,8 @@ function hitObstacle(p, m) {
 function decorNoTree(x, z) {
   return Math.hypot(x - CITY.x, z - CITY.z) < CITY.R - 300 || canyonDist(x, z) < CANYON.rw + 30 || rallyNearest(x, z).d < 16 || roadNearest(x, z).d < 14;
 }
-// --- touffes d'herbe et fleurs autour du joueur (instanciées, ondulent au vent), posées sur le relief détaillé
-const GRASS = (() => {
-  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 128;
-  const g = cv.getContext('2d');
-  for (let i = 0; i < 70; i++) {
-    const x = 10 + Math.random() * 108, h = 50 + Math.random() * 75, bend = (Math.random() - 0.5) * 30;
-    const gr = g.createLinearGradient(0, 128, 0, 128 - h); gr.addColorStop(0, '#5a7a36'); gr.addColorStop(1, Math.random() < 0.3 ? '#dfe8a0' : '#a8cc66');
-    g.fillStyle = gr; g.beginPath(); g.moveTo(x - 2.5, 128); g.quadraticCurveTo(x + bend * 0.5, 128 - h * 0.6, x + bend, 128 - h); g.quadraticCurveTo(x + bend * 0.5 + 1, 128 - h * 0.6, x + 2.5, 128); g.fill();
-  }
-  for (let i = 0; i < 6; i++) { g.fillStyle = ['#f4f0e0', '#f2d24a', '#d8a0e8'][i % 3]; g.beginPath(); g.arc(20 + Math.random() * 90, 20 + Math.random() * 50, 3.5, 0, 7); g.fill(); }
-  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
-  const geo = new THREE.BufferGeometry();
-  const P = [], UV = [], I = [];
-  for (let k = 0; k < 3; k++) { const a = k * Math.PI / 3, cx = Math.cos(a) * 0.6, cz = Math.sin(a) * 0.6, b = k * 4;
-    P.push(-cx, 0, -cz, cx, 0, cz, cx, 1, cz, -cx, 1, -cz); UV.push(0, 0, 1, 0, 1, 1, 0, 1); I.push(b, b + 1, b + 2, b, b + 2, b + 3, b, b + 2, b + 1, b, b + 3, b + 2); }
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); geo.setAttribute('uv', new THREE.Float32BufferAttribute(UV, 2)); geo.setIndex(I);
-  geo.setAttribute('normal', new THREE.Float32BufferAttribute(P.map((v, i) => i % 3 === 1 ? 1 : 0), 3));
-  const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.4 });
-  const uT = { value: 0 };
-  mat.onBeforeCompile = (sh) => { sh.uniforms.uT = uT; sh.vertexShader = 'uniform float uT;\n' + sh.vertexShader.replace('#include begin_vertex', `#include begin_vertex
-    vec4 wq = instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
-    transformed.x += position.y * 0.18 * sin(uT * 1.7 + wq.x * 0.08 + wq.z * 0.05);
-    transformed.z += position.y * 0.12 * sin(uT * 1.3 + wq.z * 0.07);`); };
-  const CELL = 36, R = IS_TOUCH ? 2 : 3, PER = IS_TOUCH ? 70 : 90, SL = (2 * R + 1) ** 2;
-  const im = new THREE.InstancedMesh(geo, mat, SL * PER); im.frustumCulled = false; im.visible = false;
-  scene.add(im);
-  const slots = new Map(), free = []; for (let k = 0; k < SL; k++) free.push(k);
-  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), v = new THREE.Vector3(), sc = new THREE.Vector3(), col = new THREE.Color(), zero = new THREE.Matrix4().makeScale(0, 0, 0);
-  const fill = (slot, cx, cz) => {
-    let seed = (cx * 73856093) ^ (cz * 19349663); const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
-    for (let k = 0; k < PER; k++) {
-      const x = (cx + rnd()) * CELL, z = (cz + rnd()) * CELL, s = 0.55 + rnd() * 0.8, r = rnd() * 6.28, c = rnd();
-      const h = meshHeight(x, z), id = slot * PER + k;
-      const rq = roadQuery(x, z, 12);
-      if (h < 1.2 || h > 560 || (rq.R && rq.d < rq.R.hw + 3.6) || rallyNearest(x, z).d < 7 || Math.hypot(x - CITY.x, z - CITY.z) < CITY.r || onHardSurface(x, z) || canyonDist(x, z) < CANYON.rw + 40) { im.setMatrixAt(id, zero); continue; }
-      v.set(x, h - 0.05, z); q.setFromAxisAngle(up, r); sc.set(s * 1.3, s * (0.7 + c * 0.6), s * 1.3);
-      m4.compose(v, q, sc); im.setMatrixAt(id, m4);
-      im.setColorAt(id, col.setRGB(0.75 + c * 0.35, 0.8 + c * 0.25, 0.65 + c * 0.2));
-    }
-  };
-  let lastK = '';
-  return {
-    uT,
-    update(x, z, on) {
-      im.visible = on; if (!on) return;
-      const cx0 = Math.floor(x / CELL), cz0 = Math.floor(z / CELL), key = cx0 + ',' + cz0;
-      if (key === lastK) return; lastK = key;
-      for (const [k, sl] of slots) { const [a, b] = k.split(',').map(Number); if (Math.abs(a - cx0) > R || Math.abs(b - cz0) > R) { slots.delete(k); free.push(sl); } }
-      let changed = false;
-      for (let a = -R; a <= R; a++) for (let b = -R; b <= R; b++) {
-        const k = (cx0 + a) + ',' + (cz0 + b); if (slots.has(k)) continue;
-        const sl = free.pop(); slots.set(k, sl); fill(sl, cx0 + a, cz0 + b); changed = true;
-      }
-      if (changed) { im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true; }
-    },
-    reset() { slots.clear(); free.length = 0; for (let k = 0; k < SL; k++) free.push(k); lastK = ''; }
-  };
-})();
+// --- herbe supprimée : plus de touffes 3D au sol (gain de fluidité et de bruit visuel)
+const GRASS = { uT: { value: 0 }, update() {}, reset() {} };
 
 // --- viaducs : tablier en béton, parapets et piliers (instanciés) au-dessus des creux
 {
@@ -1539,7 +1473,7 @@ const GRASS = (() => {
 // --- tunnels : galerie voûtée sous la montagne, éclairage au plafond, portails
 const TUNNELS = [];
 {
-  const wallMat = new THREE.MeshLambertMaterial({ color: 0xb4ada2, side: THREE.DoubleSide });
+  const wallMat = new THREE.MeshLambertMaterial({ color: 0xb4ada2, side: THREE.DoubleSide, vertexColors: true, emissive: 0x2a251e, emissiveIntensity: 0.6 });
   const lampMat = new THREE.MeshBasicMaterial({ color: 0xffd99a });
   const portalMat = new THREE.MeshLambertMaterial({ color: 0x8f8a80 });
   const spans = [];
@@ -1548,22 +1482,24 @@ const TUNNELS = [];
     for (let i = 0; i <= R.n; i++) {
       const inside = i < R.n && R.tun[i] && terrainHeight(R.X[i], R.Z[i]) > R.Y[i] + 6.5;
       if (inside) { if (a < 0) a = i; b = i; }
-      else if (a >= 0 && (i >= R.n || !R.tun[i] || i - b > 6)) { spans.push([R, Math.max(0, a - 3), Math.min(R.n - 1, b + 3)]); a = -1; }
+      else if (a >= 0 && (i >= R.n || !R.tun[i] || i - b > 6)) { spans.push([R, a, b]); a = -1; }
     }
   });
   spans.forEach(([R, a, b]) => {
     if (!R.tube) R.tube = new Uint8Array(R.n); for (let i = a; i <= b; i++) R.tube[i] = 1;
     const W = R.hw + 2.4, PR = [[-W, -0.4], [-W, 4.6], [-W * 0.72, 6.6], [-W * 0.3, 7.5], [W * 0.3, 7.5], [W * 0.72, 6.6], [W, 4.6], [W, -0.4]];
-    const P = [], I = [], C = PR.length;
+    const P = [], I = [], COL = [], C = PR.length;
     const lamps = [];
     for (let i = a; i <= b; i++) {
       const i0 = Math.max(i - 1, 0), i1 = Math.min(i + 1, R.n - 1), tx = R.X[i1] - R.X[i0], tz = R.Z[i1] - R.Z[i0], tl = Math.hypot(tx, tz) || 1, nx = -tz / tl, nz = tx / tl;
-      for (const [s, h] of PR) P.push(R.X[i] + nx * s, R.Y[i] + h, R.Z[i] + nz * s);
-      if ((i - a) % 6 === 3) lamps.push([R.X[i], R.Y[i] + 7.3, R.Z[i], Math.atan2(tx, tz)]);
+      // éclairage simulé : plus clair au passage des luminaires, plus sombre entre deux
+      const ph = ((i - a) % 6 + 6) % 6, dl = Math.min(Math.abs(ph - 3), 3), bright = 0.62 + 0.38 * (1 - dl / 3);
+      for (const [s, h] of PR) { P.push(R.X[i] + nx * s, R.Y[i] + h, R.Z[i] + nz * s); COL.push(bright, bright, bright); }
+      if (ph === 3) lamps.push([R.X[i], R.Y[i] + 7.3, R.Z[i], Math.atan2(tx, tz)]);
     }
     for (let q = 0; q < b - a; q++) for (let c = 0; c < C - 1; c++) { const k = q * C + c, k2 = k + C; I.push(k, k2, k + 1, k + 1, k2, k2 + 1); }
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); geo.setIndex(I); geo.computeVertexNormals();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); geo.setAttribute('color', new THREE.Float32BufferAttribute(COL, 3)); geo.setIndex(I); geo.computeVertexNormals();
     const tube = new THREE.Mesh(geo, wallMat); tube.castShadow = true; tube.receiveShadow = true; scene.add(tube);
     const lg = new THREE.BoxGeometry(0.5, 0.18, 3.2), li = new THREE.InstancedMesh(lg, lampMat, lamps.length), m4 = new THREE.Matrix4(), q4 = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
     lamps.forEach(([x, y, z, ang], k) => { m4.compose(new THREE.Vector3(x, y, z), q4.setFromAxisAngle(up, ang), new THREE.Vector3(1, 1, 1)); li.setMatrixAt(k, m4); });
@@ -1578,9 +1514,16 @@ const TUNNELS = [];
       const j = clamp(i - dir * 2, 0, R.n - 1), tx = R.X[i] - R.X[j], tz = R.Z[i] - R.Z[j], ang = Math.atan2(tx, tz);
       const grp = new THREE.Group(); grp.position.set(R.X[i], R.Y[i], R.Z[i]); grp.rotation.y = ang;
       const box = (w, h, d, x, y, z, m) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); o.position.set(x, y, z); o.castShadow = true; grp.add(o); return o; };
-      box(9, 22, 3, -(W + 4.5), 9, 0, portalMat); box(9, 22, 3, W + 4.5, 9, 0, portalMat);
-      box(2 * W + 18, 12, 3, 0, 13.5, 0, portalMat);
-      const sg = new THREE.Mesh(new THREE.PlaneGeometry(12, 2.25), signMat); sg.position.set(0, 9.4, dir * 1.55); if (dir < 0) sg.rotation.y = Math.PI; grp.add(sg);
+      // ouverture basse (4,5 m) : elle reste sous la naissance de la voûte, donc
+      // aucun morceau de colline ne dépasse dans le tunnel
+      box(4.0, 5.0, 2.6, -(W + 2.0), 2.0, 0, portalMat); box(4.0, 5.0, 2.6, W + 2.0, 2.0, 0, portalMat);
+      box(2 * W + 8, 3.3, 2.6, 0, 6.15, 0, portalMat);
+      // encadrement plus sombre autour de l'ouverture (fini le mur plat)
+      const trimMat = new THREE.MeshLambertMaterial({ color: 0x6f6a61 });
+      const zf = -dir * 1.34;   // côté extérieur du portail
+      box(0.8, 4.9, 0.45, -(W + 0.4), 2.05, zf, trimMat); box(0.8, 4.9, 0.45, W + 0.4, 2.05, zf, trimMat);
+      box(2 * W + 1.6, 0.8, 0.45, 0, 4.5, zf, trimMat);
+      const sg = new THREE.Mesh(new THREE.PlaneGeometry(7.5, 1.4), signMat); sg.position.set(0, 6.15, -dir * 1.62); if (dir > 0) sg.rotation.y = Math.PI; grp.add(sg);
       scene.add(grp);
       const fx = R.X[i], fz = R.Z[i], ux = Math.sin(ang), uz = Math.cos(ang), px = uz, pz = -ux;
       for (const sd of [-1, 1]) obBox(fx + px * sd * (W + 4.5), fz + pz * sd * (W + 4.5), 1.5, 4.5, Math.atan2(uz, ux), R.Y[i] - 2, R.Y[i] + 20);
@@ -5705,7 +5648,7 @@ el('brally').addEventListener('click', e => {
 // ===================================================================
 // circulation : voitures autonomes sur les routes
 // ===================================================================
-const TRAF_N = IS_TOUCH ? 36 : 56;
+const TRAF_N = IS_TOUCH ? 24 : 44;
 // gabarits : berline, SUV, fourgon, camion — fusionnés et instanciés (3 appels de dessin par gabarit)
 const TRAF_TYPES = (() => {
   const merge = (parts) => {
